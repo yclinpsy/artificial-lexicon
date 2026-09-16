@@ -58,6 +58,17 @@ async function runAll() {
   record("mouse-tracking extension", typeof jsPsychExtensionMouseTracking !== "undefined",
     typeof jsPsychExtensionMouseTracking !== "undefined" ? "loaded" : "NOT FOUND — lib/extension-mouse-tracking.js is missing");
 
+  // 1b. every lib file experiment.html loads is actually on the server
+  try {
+    const src = await (await fetch("experiment.html")).text();
+    const libs = [...src.matchAll(/<script src="(lib\/[^"]+)"|<link[^>]+href="(lib\/[^"]+)"/g)].map(m => m[1] || m[2]);
+    const missing = [];
+    for (const f of libs) { try { const r = await fetch(f, { method: "HEAD" }); if (!r.ok) missing.push(f); } catch (e) { missing.push(f); } }
+    record("lib folder complete", missing.length === 0,
+      missing.length === 0 ? "all " + libs.length + " files experiment.html needs are present"
+                           : "MISSING: " + missing.join(", ") + " — re-upload these into lib/");
+  } catch (e) {}
+
   // 2. stimuli
   const okStim = (typeof STIM !== "undefined") && STIM.words && STIM.words.length === 56 &&
                  STIM.nonwords.length === 56 && STIM.transfer.length === 16;
@@ -137,7 +148,7 @@ async function runAll() {
   try {
     const txt = await (await fetch("experiment.html")).text();
     const grab = k => (txt.match(new RegExp(k + '\\s*:\\s*"([^"]*)"')) || [])[1];
-    cfg = { pipe: grab("DATAPIPE_ID"), sona: grab("SONA_CREDIT_URL"), qualtrics: grab("QUALTRICS_URL"),
+    cfg = { pipe: grab("DATAPIPE_ID"), mode: grab("MODE"), sona: grab("SONA_CREDIT_URL"), qualtrics: grab("QUALTRICS_URL"),
             debug: /DEBUG:\s*(true|false)/.exec(txt) ? /DEBUG:\s*(true|false)/.exec(txt)[1] : "?" };
   } catch (e) {}
   if (cfg) {
@@ -157,14 +168,19 @@ async function runAll() {
   // 8. DataPipe reachable
   if (cfg && cfg.pipe) {
     let reach = false;
-    try { await fetch("https://pipe.jspsych.org/api/data/", { method: "OPTIONS", mode: "no-cors" }); reach = true; } catch (e) {}
+    // A real request; the server answers 4xx to an empty body but that still proves it is reachable.
+    try { const r = await fetch("https://pipe.jspsych.org/api/data/", { method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "*/*" }, body: "{}" });
+          reach = r.status > 0; } catch (e) {}
     record("DataPipe reachable", reach, reach ? "the server responded" : "could not reach pipe.jspsych.org from this network", true);
   }
 
-  // 9. URL parameters
+  // 9. URL parameters (only matter in remote mode; the lab form supplies the identifier)
   const q = new URLSearchParams(location.search);
   const gotID = q.get("PROLIFIC_PID") || q.get("id");
-  record("participant identifier", !!gotID,
+  const labMode = cfg && cfg.mode === "lab";
+  if (labMode) record("participant identifier", true, "lab mode: the research assistant's form supplies it");
+  else record("participant identifier", !!gotID,
     gotID ? "read from the link: " + gotID
           : "no identifier in this URL. Test again with ?PROLIFIC_PID=test123 or ?id=test123 appended", true);
 
