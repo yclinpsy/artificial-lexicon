@@ -181,7 +181,7 @@ const CONFIG = {
                                    // and the dominance index needs it. It was false until
                                    // 24 September 2026, which would have silently dropped a
                                    // registered measure from every session in an HSI sample.
-  DEBUG:            true
+  DEBUG:            false
 };
 
 /* ============================================================
@@ -1002,9 +1002,24 @@ function priorSessions() {
 timeline.unshift({
   timeline: [{
     type: jsPsychHtmlButtonResponse,
-    choices: ["Continue", "This person has done it before, note that and continue"],
+    /* Two wordings. In the lab this screen is read by the assistant, for whom a previous session
+       on the machine is routine. Remotely it is read by the participant on their own computer,
+       and until 24 September 2026 they got the assistant's text ("In a lab that is normal"),
+       which asks them to judge "this person" -- themselves -- in the third person. The answer
+       is recorded the same way in both: button 0 is a first session, button 1 a repeat. */
+    choices: function () {
+      return CONFIG.MODE === "lab"
+        ? ["Continue", "This person has done it before, note that and continue"]
+        : ["No, this is my first time", "Yes, I have done this study before"];
+    },
     stimulus: function () {
       const n = priorSessions().length;
+      if (CONFIG.MODE !== "lab")
+        return '<div class="prose"><h3>Have you taken part in this study before?</h3>' +
+          '<p>This computer has been used for this study before. That can happen for many reasons, ' +
+          'so we simply ask.</p>' +
+          '<p>If you started it once and could not finish, answer <b>yes</b>. You can still take part, ' +
+          'and your answer does not affect your credit.</p></div>';
       return '<div class="prose"><h3>This computer has run the study before</h3>' +
         '<p>' + n + ' completed session' + (n === 1 ? '' : 's') + ' on this machine. In a lab that is ' +
         'normal, and it usually means nothing.</p>' +
