@@ -175,9 +175,13 @@ const CONFIG = {
                                                    // area by then, the trial is flagged and the
                                                    // participant is reminded to move earlier
   LEXTALE_EN:       true,          // English LexTALE, ~5 min, mouse-tracked
-  LEXTALE_ES:       false,         // Spanish LexTALE-Esp, ~5 min. Turn on only for a
-                                   // Spanish-English sample; it adds 5 minutes.
-  DEBUG:            true
+  LEXTALE_ES:       true,          // Spanish LexTALE-Esp, ~5 min, gated on a yes/no question about
+                                   // ever learning or being around Spanish. REGISTERED: the
+                                   // preregistration says it is given to everyone with exposure,
+                                   // and the dominance index needs it. It was false until
+                                   // 24 September 2026, which would have silently dropped a
+                                   // registered measure from every session in an HSI sample.
+  DEBUG:            false
 };
 
 /* ============================================================
@@ -320,11 +324,29 @@ function saveAndRedirect(csv) {
     window.localStorage.setItem(DONE_KEY, JSON.stringify(s.slice(-50)));
   } catch (e) {}
   if (typeof jatos !== "undefined" && jatos.submitResultData) { jatos.submitResultData(csv, jatos.startNextComponent); return; }
+  /* The screen used to go blank here: jsPsych clears the page when the timeline ends, and the
+     upload then ran with nothing on screen and no time limit, so a slow or stalled connection
+     left the participant looking at an empty page with no idea whether to wait or close it --
+     and closing it loses the whole session. Now a message is shown at once, each attempt is
+     limited to 25 s, a failed or refused upload is retried once, and only then is the file
+     saved to the participant's own computer before they are sent on. */
+  const say = (h, p) => { document.body.innerHTML =
+    '<div style="max-width:660px;margin:90px auto;text-align:center;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:19px;line-height:1.6">' +
+    '<h2>' + h + '</h2><p>' + p + '</p><p style="color:#555;margin-top:22px">Participant code<br>' +
+    '<span style="font-family:monospace;font-size:24px">' + SUBJECT.uid + '</span></p></div>'; };
+  say("Saving your answers…", "This usually takes a few seconds. <b>Please do not close this window.</b>");
   if (CONFIG.DATAPIPE_ID) {
-    fetch("https://pipe.jspsych.org/api/data/", { method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "*/*" },
-      body: JSON.stringify({ experimentID: CONFIG.DATAPIPE_ID, filename: SUBJECT.uid + ".csv", data: csv })
-    }).then(redirect).catch(() => downloadLocal(csv));
+    const send = () => {
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+      return fetch("https://pipe.jspsych.org/api/data/", { method: "POST", signal: ctl.signal,
+        headers: { "Content-Type": "application/json", "Accept": "*/*" },
+        body: JSON.stringify({ experimentID: CONFIG.DATAPIPE_ID, filename: SUBJECT.uid + ".csv", data: csv })
+      }).then(r => { clearTimeout(t); if (!r.ok) throw new Error("DataPipe refused the file (" + r.status + ")"); });
+    };
+    send()
+      .catch(() => { say("Still saving…", "The first attempt did not go through, so it is being sent again. <b>Please keep this window open.</b>"); return send(); })
+      .then(() => { say("Saved.", "Taking you to the questionnaire now."); setTimeout(redirect, 600); })
+      .catch(() => { say("Saving to your computer", "The data could not be sent over the internet, so a copy is being downloaded to this computer. Please keep the downloaded file; you will be taken to the questionnaire next."); setTimeout(() => downloadLocal(csv), 1200); });
     return;
   }
   downloadLocal(csv);
