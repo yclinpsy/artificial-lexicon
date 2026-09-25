@@ -1,0 +1,1567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Word learning study</title>
+<script src="lib/jspsych.js"></script>
+<script src="lib/plugin-html-keyboard-response.js"></script>
+<script src="lib/plugin-html-button-response.js"></script>
+<script src="lib/plugin-audio-keyboard-response.js"></script>
+<script src="lib/plugin-audio-button-response.js"></script>
+<script src="lib/plugin-preload.js"></script>
+<script src="lib/plugin-fullscreen.js"></script>
+<script src="lib/plugin-browser-check.js"></script>
+
+<script src="lib/extension-mouse-tracking.js"></script>
+<link href="lib/jspsych.css" rel="stylesheet">
+<script src="stimuli.js"></script>
+<style>
+  :root {
+    --ink:#1a1a1a; --muted:#5a5a5a; --line:#333; --ok:#1a7f37; --warn:#b3452f;
+    --face: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  html, body { background:#fff; margin:0; padding:0; color:var(--ink);
+               -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  .jspsych-display-element { overflow-y:auto; }
+  .jspsych-content-wrapper { padding: 20px 16px; box-sizing: border-box; }
+  .jspsych-content { max-width: min(1000px, 94vw); font-family: var(--face);
+                     font-size: clamp(16px, 1.1vw + 10px, 19px); line-height: 1.6; }
+  .jspsych-content, .prose, .mt-target { overflow-wrap: anywhere; word-break: normal; }
+
+  /* the invented alphabet, always the largest thing on the screen */
+  .word   { font-family:'ArtificialAlphabet', monospace; font-size: clamp(56px, 7.5vw, 92px);
+            letter-spacing: 14px; line-height:1.1; }
+  /* The training choices are jsPsych buttons, so this rule has to out-rank
+     button.jspsych-btn below (element + class beats a bare class). Written as a bare
+     .choice it lost, and every training trial showed the spellings in the interface font
+     -- Roman letters -- while the feedback line under them showed the invented alphabet.
+     The class was applied, the font was loaded, and the two screens disagreed. */
+  button.jspsych-btn.choice,
+  .choice { font-family:'ArtificialAlphabet', monospace !important;
+            font-size: clamp(38px, 4.8vw, 60px); font-weight: 400;
+            letter-spacing: 10px; padding: 12px 26px; }
+
+  /* reading text: a comfortable measure, generous spacing, clear hierarchy */
+  .prose  { text-align:left; max-width: 40em; margin: 0 auto; }
+  .prose h2 { font-size: clamp(24px, 2vw + 12px, 32px); line-height:1.25; margin:0 0 18px;
+              letter-spacing:-0.01em; font-weight:650; }
+  .prose h3 { font-size: clamp(20px, 1.4vw + 11px, 25px); line-height:1.3; margin:0 0 14px;
+              letter-spacing:-0.005em; font-weight:650; }
+  .prose p  { margin: 0 0 15px; }
+  .prose ol, .prose ul { margin: 0 0 15px; padding-left: 26px; }
+  .prose li { margin-bottom: 9px; }
+  .prose b  { font-weight:650; }
+  .prose hr { border:0; border-top:1px solid #e2e2e2; margin:22px 0; }
+  .fb-ok  { color:var(--ok);   font-weight:650; }
+  .fb-no  { color:var(--warn); font-weight:650; }
+  .key    { display:inline-block; border:1px solid #b8b8b8; border-bottom-width:2px;
+            border-radius:6px; padding:2px 10px; font-weight:650; background:#f7f7f7;
+            font-size:0.92em; }
+
+  button.jspsych-btn {
+    font-family: var(--face); font-size: clamp(16px, 0.9vw + 11px, 19px); font-weight:550;
+    padding: 13px 30px; margin: 8px; max-width: 90vw; white-space: normal;
+    border:1px solid #2b2b2b; border-radius:8px; background:#fff; color:var(--ink);
+    cursor:pointer; transition: background .12s ease, transform .06s ease;
+  }
+  button.jspsych-btn:hover:not([disabled]) { background:#f2f2f2; }
+  button.jspsych-btn:active:not([disabled]) { transform: translateY(1px); }
+  button.jspsych-btn[disabled] { cursor:default; }
+
+  /* ---- mouse-tracking stage -------------------------------------------------
+     Fixed logical size so trajectories are comparable; scaled as one unit when
+     the window is smaller, never reflowed. All five children sit inside the
+     stage, which is what keeps the two response areas symmetric about START.  */
+  #mt-scaler { transform-origin: top center; }
+  #mt-stage  { position:relative; width:960px; height:560px; margin:0 auto; }
+  .mt-target { position:absolute; top:12px; width:250px; min-height:104px; display:flex;
+               align-items:center; justify-content:center; text-align:center;
+               border:2px solid var(--line); border-radius:12px; background:#fbfbfb;
+               cursor:pointer; font-family:var(--face); font-size:27px; font-weight:600;
+               letter-spacing:0.01em; user-select:none; padding:10px 12px; box-sizing:border-box;
+               line-height:1.2; box-shadow:0 1px 0 rgba(0,0,0,.04); }
+  #mt-left  { left:12px; }  #mt-right { right:12px; }
+  .mt-target.word-opt   { font-family:'ArtificialAlphabet', monospace; font-size:50px; letter-spacing:8px; }
+  .mt-target.long-label { font-size:21px; letter-spacing:0; font-weight:550; }
+  #mt-start { position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+              width:196px; height:60px; border:2px solid var(--line); border-radius:12px;
+              background:#efefef; cursor:pointer; font-family:var(--face); font-size:21px;
+              font-weight:650; letter-spacing:0.06em; display:flex; align-items:center;
+              justify-content:center; user-select:none; }
+  /* The stimulus is centred in the space between the response areas (which end at 116)
+     and the START button (which begins at 484), so its middle sits at 300. The box is
+     bounded and centres its content, because an unbounded div plus the default paragraph
+     margins pushed the text down to 379 and stretched the container over START, where it
+     intercepted pointer events. pointer-events:none is belt and braces. */
+  #mt-stim  { position:absolute; left:50%; top:150px; transform:translateX(-50%);
+              width:640px; height:300px; display:flex; align-items:center;
+              justify-content:center; text-align:center; pointer-events:none; }
+  #mt-stim p, #mt-stim .word { margin:0; }
+  #mt-hint  { position:absolute; left:50%; bottom:88px; transform:translateX(-50%);
+              color:var(--muted); font-family:var(--face); font-size:16px; width:540px;
+              text-align:center; }
+
+  #size-warning { position:fixed; inset:0; background:#fff; z-index:9999; display:none;
+                  align-items:center; justify-content:center; text-align:center; padding:40px;
+                  font-family:var(--face); }
+  #size-warning p { max-width:34em; font-size:20px; line-height:1.65; }
+</style>
+</head>
+<body>
+<div id="size-warning"><p><b>Your window has become too small for the study.</b><br><br>
+Please make the browser window bigger, or press <b>F11</b> for full screen
+(<b>Ctrl</b>+<b>Cmd</b>+<b>F</b> on a Mac), and reset the page zoom to 100% with
+<b>Ctrl</b>+<b>0</b> (<b>Cmd</b>+<b>0</b> on a Mac).<br><br>
+Nothing is lost. This message disappears as soon as the window is large enough and you can
+carry on exactly where you were.</p></div>
+</body>
+<script>
+/* ============================================================
+   CONFIGURATION — edit these, nothing else.
+   ============================================================ */
+const CONFIG = {
+  AUDIO_DIR:        "audio/",
+  DATAPIPE_ID:      "j6s14apZKABg",
+  SONA_CREDIT_URL:  "",
+  PROLIFIC_URL:     "",
+  QUALTRICS_URL:    "https://utrgv.co1.qualtrics.com/jfe/form/SV_4YlUmHZ7IlkTnka",
+                                   // the follow-up survey; uid, source and pid are appended
+                                  // as ?uid=...&source=...  Leave "" to skip the hand-off.
+  TRAINING:         { blockSize: 56, minBlocks: 6, maxBlocks: 20, criterion: 0.90, consecutive: 2 },
+  MODE:             "auto",       // "auto"     decide per session from whether the link carries a
+                                   //            participant code. One address for everyone:
+                                   //              .../experiment.html            -> laboratory
+                                   //              .../experiment.html?id=XXXX    -> remote (SONA)
+                                   //              ...?PROLIFIC_PID=XXXX          -> remote (Prolific)
+                                   //            SONA and Prolific add the code themselves, so a
+                                   //            remote participant always has one and an assistant
+                                   //            in the lab never does. The assistant opens the plain
+                                   //            address and there is nothing to remember.
+                                   //            Why not a ?lab=1 flag instead: forgetting it would
+                                   //            run a lab session as remote SILENTLY, every session,
+                                   //            with no assistant name recorded. Getting this rule
+                                   //            wrong needs the SONA Study URL to lack its code --
+                                   //            a one-time setup error that shows the assistant's
+                                   //            form to the first remote tester, loudly.
+                                   //            ?mode=remote forces remote on a plain link, for
+                                   //            testing the remote flow without a code.
+                                   // "lab"      force the laboratory version on every link.
+                                   // "remote"   force the remote version on every link.
+  LAB_NAME:         "Cognitive Science and Language Laboratory",
+                                   // shown on the consent screen. It was a dead setting
+                                   // until September 2026: the name was also hardcoded in
+                                   // the consent text, so changing this did nothing and a
+                                   // lab reusing the study would have consented people
+                                   // under the wrong laboratory without any sign of it.
+
+                                   // There is deliberately no HEADPHONES_REQUIRED setting. Until
+                                   // September 2026 it existed and defaulted to false, which meant
+                                   // the laboratory and the online version applied different rules
+                                   // and the decision about loudspeaker listeners was deferred to
+                                   // the analysis, where it becomes a researcher degree of freedom.
+                                   // The rule is now the same for everyone and is enforced here:
+                                   // two attempts at the listening check, 5 of 6 to continue. The
+                                   // best score is still recorded for every participant, so it
+                                   // remains usable as a covariate.
+  AUDIO_DELAY:      500,           // ms between the START click and the sound. A fixed gap gives
+                                   // every trial the same audio onset and stops participants from
+                                   // moving before the word begins (Mitterer, 2025, uses 500 ms).
+  ITI:              600,           // ms of blank screen between trials, so each one starts clean
+  RT_REMINDER:      3000,          // ms: a gentle on-screen nudge if a trial is still unanswered.
+                                   // Not a deadline; the trial never times out.
+  MOUSE:            { minimum_sample_time: 0,     // 0 = sample as fast as the browser allows
+                      init_deadline: 400 },        // ms: if the cursor has not left the start
+                                                   // area by then, the trial is flagged and the
+                                                   // participant is reminded to move earlier
+  LEXTALE_EN:       true,          // English LexTALE, ~5 min, mouse-tracked
+  LEXTALE_ES:       true,          // Spanish LexTALE-Esp, ~5 min, gated on a yes/no question about
+                                   // ever learning or being around Spanish. REGISTERED: the
+                                   // preregistration says it is given to everyone with exposure,
+                                   // and the dominance index needs it. It was false until
+                                   // 24 September 2026, which would have silently dropped a
+                                   // registered measure from every session in an HSI sample.
+  DEBUG:            false
+};
+
+/* ============================================================
+   1. PARTICIPANT ID AND SOURCE
+   ============================================================ */
+const qs = new URLSearchParams(window.location.search);
+const par = (names) => { for (const n of names) { const v = qs.get(n); if (v) return v; } return null; };
+const PID_PROLIFIC = par(["PROLIFIC_PID", "prolific_pid"]);
+const PID_SONA     = par(["id", "sona_id", "survey_code", "SURVEY_CODE"]);
+const SUBJECT = {
+  source: PID_PROLIFIC ? "prolific" : (PID_SONA ? "sona" : "direct"),
+  external_id: PID_PROLIFIC || PID_SONA || null,
+  study_id: par(["STUDY_ID", "study_id"]), session_id: par(["SESSION_ID", "session_id"]),
+  uid: Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+};
+
+/* One address, two settings, decided by whether the link carries a participant code. A SONA or
+   Prolific link always does (the platform appends it) and is remote; the plain address an
+   assistant opens in the lab never does and is the laboratory version. A panel code always
+   wins, so a remote participant cannot reach the assistant's setup screen whatever they add to
+   their address bar. ?mode=remote lets the researcher test the remote flow without a code. */
+const FORCE_REMOTE = (qs.get("mode") || "").toLowerCase() === "remote";
+if (CONFIG.MODE === "auto")
+  CONFIG.MODE = (SUBJECT.source === "direct" && !FORCE_REMOTE) ? "lab" : "remote";
+
+
+/* ============================================================
+   2. COUNTERBALANCING
+   ============================================================ */
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+const LIST = Math.random() < 0.5 ? 1 : 2;
+const MODALITY_FIRST = Math.random() < 0.5 ? "read" : "listen";
+const HALF_A = new Set();
+["A", "B", "C", "D"].forEach(c => {
+  const rimes = [...new Set(STIM.words.filter(w => w.cell === c).map(w => w.rime))].sort();
+  rimes.forEach((r, i) => { if (i % 2 === 0) HALF_A.add(r); });
+});
+const modalityFor = r => (LIST === 1 ? (HALF_A.has(r) ? "read" : "listen") : (HALF_A.has(r) ? "listen" : "read"));
+
+/* ============================================================
+   3. jsPsych INIT — the mouse-tracking extension is registered here
+   ============================================================ */
+const jsPsych = initJsPsych({
+  on_interaction_data_update: function (d) {
+    if (d.event in INTERACT) INTERACT[d.event] += 1;
+    if (d.event === "blur") INTERACT.last_blur_ms = d.time;
+    jsPsych.data.addProperties({
+      n_window_blur: INTERACT.blur, n_fullscreen_exit: INTERACT.fullscreenexit
+    });
+  },
+  extensions: [{ type: jsPsychExtensionMouseTracking, params: { minimum_sample_time: CONFIG.MOUSE.minimum_sample_time } }],
+  on_finish: () => saveAndRedirect(jsPsych.data.get().csv())
+});
+/* A fingerprint of the materials actually in use: the lexicon, the embedded font and the
+   first 2 KB of every recording. It is recomputed by compute_materials_version.py and
+   stamped on every row, so data collected before and after a change to the materials can
+   be told apart. Without it they pool silently -- the files look identical, and no column
+   says otherwise. This project changed its font and re-equalised its audio mid-development;
+   had that happened mid-collection, nothing would have shown it. */
+const MATERIALS_VERSION = "e8d2681cb968";
+
+/* repeat_participant is set by a screen that only appears when this machine has run the
+   study before, so the very first session on a computer carried no such column at all.
+   A field that is present for some participants and absent for others is worse than one
+   that is always false: the analysis cannot tell "not a repeat" from "not asked", and
+   `truthy(NA)` quietly reads as FALSE either way. Default it here. */
+
+jsPsych.data.addProperties({
+  materials_version: MATERIALS_VERSION,
+  repeat_participant: false,
+  uid: SUBJECT.uid, source: SUBJECT.source, external_id: SUBJECT.external_id,
+  study_id: SUBJECT.study_id, session_id: SUBJECT.session_id,
+  list: LIST, modality_first: MODALITY_FIRST,
+  screen_w: window.innerWidth, screen_h: window.innerHeight,
+  user_agent: navigator.userAgent, started_at: new Date().toISOString(),
+  /* Written on every row so a shortened test run can never be mistaken for a real session in
+     the analysis, however it reaches the data folder. */
+  debug: CONFIG.DEBUG === true,
+  /* The resolved setting, on every row from the first. Lab sessions overwrite it with the same
+     value once the assistant has filled in the setup screen; a session that ends before that
+     still carries it, so an abandoned lab session is not silently counted as a remote one. */
+  setting: CONFIG.MODE
+});
+
+/* ---------------------------------------------------------------------------
+   Checkpoint saving.
+   Data used to be written once, at the very end, so anyone who closed the window
+   partway through was lost completely — including the hour of training they had
+   just done. A checkpoint is now written after each major stage. Each one holds
+   everything collected so far, so the newest file for a participant is always the
+   most complete; the analysis keeps the last and ignores the rest.
+   --------------------------------------------------------------------------- */
+let CHECKPOINT_N = 0, LAST_SAVED = 0;
+function checkpoint(tag) {
+  if (typeof jatos !== "undefined" && jatos.appendResultData) {
+    try { jatos.appendResultData(jsPsych.data.get().csv()); } catch (e) {}
+    return;
+  }
+  if (!CONFIG.DATAPIPE_ID) return;                  // nothing to send to; the final
+  const rows = jsPsych.data.get().values().length;  // download still happens at the end
+  if (rows <= LAST_SAVED) return;                   // nothing new since the last one
+  /* An empty dataset produces a CSV with no header at all, and DataPipe's validation
+     rejects it for lacking trial_type -- silently, because the fetch below never looks at
+     the response. The first checkpoint fires after consent and before any trial, so this
+     used to send exactly that. Wait until there is something to send. */
+  if (rows < 3) return;
+  CHECKPOINT_N += 1; LAST_SAVED = rows;
+  const name = SUBJECT.uid + "_p" + String(CHECKPOINT_N).padStart(2, "0") + "_" + tag + ".csv";
+  fetch("https://pipe.jspsych.org/api/data/", { method: "POST", keepalive: true,
+    headers: { "Content-Type": "application/json", "Accept": "*/*" },
+    body: JSON.stringify({ experimentID: CONFIG.DATAPIPE_ID, filename: name,
+                           data: jsPsych.data.get().csv() })
+  }).catch(() => {});                               // silent: never interrupt the study
+}
+// A last attempt if the window is closed or hidden. Browsers give very little time
+// here, so keepalive is essential and success is not guaranteed; this is a safety net
+// on top of the checkpoints, not a replacement for them.
+window.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden") checkpoint("hidden");
+});
+window.addEventListener("pagehide", function () { checkpoint("exit"); });
+
+// If the window is shrunk or the page zoomed mid-study, say so instead of quietly
+// clipping the display. Checked on resize rather than continuously.
+(function watchSize() {
+  const MINW = 900, MINH = 620;
+  const warn = () => {
+    const el = document.getElementById("size-warning");
+    if (!el) return;
+    const small = window.innerWidth < MINW || window.innerHeight < MINH;
+    el.style.display = small ? "flex" : "none";
+  };
+  window.addEventListener("resize", warn);
+  setTimeout(warn, 400);
+})();
+
+function saveAndRedirect(csv) {
+  try {
+    const s = priorSessions(); s.push(new Date().toISOString());
+    window.localStorage.setItem(DONE_KEY, JSON.stringify(s.slice(-50)));
+  } catch (e) {}
+  if (typeof jatos !== "undefined" && jatos.submitResultData) { jatos.submitResultData(csv, jatos.startNextComponent); return; }
+  /* The screen used to go blank here: jsPsych clears the page when the timeline ends, and the
+     upload then ran with nothing on screen and no time limit, so a slow or stalled connection
+     left the participant looking at an empty page with no idea whether to wait or close it --
+     and closing it loses the whole session. Now a message is shown at once, each attempt is
+     limited to 25 s, a failed or refused upload is retried once, and only then is the file
+     saved to the participant's own computer before they are sent on. */
+  const say = (h, p) => { document.body.innerHTML =
+    '<div style="max-width:660px;margin:90px auto;text-align:center;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:19px;line-height:1.6">' +
+    '<h2>' + h + '</h2><p>' + p + '</p><p style="color:#555;margin-top:22px">Participant code<br>' +
+    '<span style="font-family:monospace;font-size:24px">' + SUBJECT.uid + '</span></p></div>'; };
+  say("Saving your answers…", "This usually takes a few seconds. <b>Please do not close this window.</b>");
+  if (CONFIG.DATAPIPE_ID) {
+    const send = () => {
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+      return fetch("https://pipe.jspsych.org/api/data/", { method: "POST", signal: ctl.signal,
+        headers: { "Content-Type": "application/json", "Accept": "*/*" },
+        body: JSON.stringify({ experimentID: CONFIG.DATAPIPE_ID, filename: SUBJECT.uid + ".csv", data: csv })
+      }).then(r => { clearTimeout(t); if (!r.ok) throw new Error("DataPipe refused the file (" + r.status + ")"); });
+    };
+    send()
+      .catch(() => { say("Still saving…", "The first attempt did not go through, so it is being sent again. <b>Please keep this window open.</b>"); return send(); })
+      .then(() => { say("Saved.", "Taking you to the questionnaire now."); setTimeout(redirect, 600); })
+      .catch(() => { say("Saving to your computer", "The data could not be sent over the internet, so a copy is being downloaded to this computer. Please keep the downloaded file; you will be taken to the questionnaire next."); setTimeout(() => downloadLocal(csv), 1200); });
+    return;
+  }
+  downloadLocal(csv);
+}
+function downloadLocal(csv) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = SUBJECT.uid + ".csv"; a.click(); redirect();
+}
+function redirect() {
+  // In lab mode with no questionnaire there is nowhere to send anyone: the session code
+  // on screen is the proof of participation, so the page simply stays put.
+  if (CONFIG.MODE === "lab" && !CONFIG.QUALTRICS_URL) {
+    document.body.innerHTML = '<div class="prose" style="max-width:660px;margin:70px auto;text-align:center">' +
+      '<h2>Data saved.</h2><p>Please let the research assistant know you have finished.</p>' +
+      '<p style="color:#555;margin-top:24px">Session code<br>' +
+      '<span style="font-family:monospace;font-size:26px">' + SUBJECT.uid + '</span></p>' +
+      '<p style="color:#555">' + (SUBJECT.external_id ? "Participant " + SUBJECT.external_id + " &middot; " : "") +
+      (LAB.ra || "") + '</p></div>';
+    return;
+  }
+  if (CONFIG.QUALTRICS_URL) {
+    // `setting` travels with the participant so that ONE questionnaire can serve both
+    // modes: Qualtrics branches on it to send only remote participants onward to SONA
+    // for credit, while lab participants simply finish, because the assistant credits
+    // them in person. Keeping one survey keeps one dataset.
+    const sep = CONFIG.QUALTRICS_URL.indexOf("?") === -1 ? "?" : "&";
+    window.location = CONFIG.QUALTRICS_URL + sep + "uid=" + encodeURIComponent(SUBJECT.uid) +
+      "&source=" + encodeURIComponent(SUBJECT.source) +
+      "&pid=" + encodeURIComponent(SUBJECT.external_id || "") +
+      "&setting=" + encodeURIComponent(CONFIG.MODE);
+    return;
+  }
+  if (SUBJECT.source === "prolific" && CONFIG.PROLIFIC_URL) { window.location = CONFIG.PROLIFIC_URL; return; }
+  if (SUBJECT.source === "sona" && CONFIG.SONA_CREDIT_URL) { window.location = CONFIG.SONA_CREDIT_URL + encodeURIComponent(SUBJECT.external_id || ""); return; }
+  document.body.innerHTML = '<div style="max-width:760px;margin:80px auto;font-family:sans-serif;font-size:19px;line-height:1.6"><p>Thank you. Your responses have been recorded and you may close this window.</p></div>';
+}
+
+/* font, embedded so it cannot fail to load */
+(function () { const s = document.createElement("style");
+  s.textContent = "@font-face{font-family:'ArtificialAlphabet';src:url(data:font/ttf;base64," + FONT_B64 + ") format('truetype');font-display:block;}";
+  document.head.appendChild(s); })();
+
+/* ============================================================
+   4. HEADPHONE SCREEN (tones synthesised in the browser)
+   ============================================================ */
+let audioCtx = null, audioBroken = false;
+function ctx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+function playTone(freq, gainDb, antiphase) {
+  return new Promise(resolve => {
+    let settled = false; const done = () => { if (!settled) { settled = true; resolve(); } };
+    setTimeout(done, 2500);
+    let c; try { c = ctx(); } catch (e) { audioBroken = true; return done(); }
+    const dur = 1.0, sr = c.sampleRate, buf = c.createBuffer(2, Math.floor(sr * dur), sr);
+    const amp = Math.pow(10, gainDb / 20) * 0.25;
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch), sign = (antiphase && ch === 1) ? -1 : 1;
+      for (let i = 0; i < d.length; i++) {
+        const t = i / sr, env = Math.min(1, t / 0.05) * Math.min(1, (dur - t) / 0.05);
+        d[i] = sign * amp * env * Math.sin(2 * Math.PI * freq * t);
+      }
+    }
+    try { const src = c.createBufferSource(); src.buffer = buf; src.connect(c.destination); src.onended = done; src.start(); }
+    catch (e) { audioBroken = true; done(); }
+  });
+}
+/* One rule for every participant, in the laboratory and online alike: the screen runs, and a
+   participant who fails it twice does not do the study. The second attempt exists because the
+   commonest cause of a failed first attempt is not a loudspeaker but a fault -- one earbud not
+   seated, the plug in the wrong socket, a Bluetooth headset that has downmixed to mono, the
+   volume left at zero -- and those are fixable in ten seconds once the participant is told to
+   look. A loudspeaker listener is not helped by a second attempt: the antiphase tone still
+   cancels in the air, so they are still steered to the wrong button. Two attempts at a 5-of-6
+   criterion leave a 3.5% chance of passing by guessing alone, against 1.8% for one attempt. */
+function makeHeadphoneTrials(attempt) {
+ const trials = [];
+ for (let i = 1; i <= 6; i++) {
+  const target = Math.floor(Math.random() * 3);
+  const anti = (target + 1 + Math.floor(Math.random() * 2)) % 3;   // a DIFFERENT position
+  trials.push({
+    type: jsPsychHtmlButtonResponse,
+    stimulus: '<p>Trial ' + i + ' of 6.</p><p>Listen to the three tones, then click the one that sounded <b>quietest</b>.</p><p id="hp-status" style="color:#666">Playing…</p>',
+    choices: ["1", "2", "3"],
+    button_html: (c) => '<button class="jspsych-btn" style="font-size:22px;padding:10px 26px;margin:0 8px" disabled>' + c + '</button>',
+    data: { phase: "headphone_check", attempt: attempt, target: target + 1, antiphase_pos: anti + 1 },
+    on_load: async function () {
+      const enable = () => { const el = document.getElementById("hp-status"); if (el) el.textContent = "Now choose.";
+        document.querySelectorAll(".jspsych-btn").forEach(b => b.disabled = false); };
+      const safety = setTimeout(enable, 9000);
+      /* Woods, Siegel, Traer & McDermott (2017), exactly as published. Three 200 Hz tones:
+         one is 6 dB quieter (the target -- the correct answer), a DIFFERENT one is phase-
+         reversed between the channels, the third is plain. Over headphones the ears are
+         acoustically isolated, so the antiphase tone is as loud as the plain one and the
+         attenuated tone is plainly the quietest. Over loudspeakers the two channels sum in
+         the air and the antiphase tone partly cancels, so it sounds quieter than the target
+         and the loudspeaker listener picks it and fails. The target must NOT be the antiphase
+         tone: making them the same tone inverts the logic and lets loudspeaker users pass.
+         The context is warmed up with a silent tone first: on Safari and on Chrome after an
+         autoplay block the first buffer can start before the context is running, which
+         swallows tone 1 and leaves the participant judging two tones out of three. */
+      try { await playTone(200, -120, false); } catch (e) {}
+      try { for (let k = 0; k < 3; k++) { await playTone(200, k === target ? -6 : 0, k === anti); await new Promise(r => setTimeout(r, 400)); } }
+      catch (e) { audioBroken = true; }
+      clearTimeout(safety); enable();
+    },
+    on_finish: d => { d.correct = (d.response + 1) === d.target; d.audio_broken = audioBroken; }
+  });
+ }
+ return trials;
+}
+const headphoneTrials  = makeHeadphoneTrials(1);
+const headphoneRetrial = makeHeadphoneTrials(2);
+const hpScore = a => jsPsych.data.get().filter({ phase: "headphone_check", attempt: a })
+                       .select("correct").sum();
+
+/* ============================================================
+   5. MOUSE-TRACKING TRIAL
+   The participant clicks START at the bottom centre, which reveals the
+   stimulus; the two response areas are fixed at the top corners. The
+   extension records the cursor path and the on-screen position of both
+   targets, so curvature toward the unchosen option is computable offline.
+   ============================================================ */
+const A = f => CONFIG.AUDIO_DIR + f + ".wav";
+// Files are fetched once into an in-memory cache during preload and cloned per trial.
+// Safari in particular is unreliable about re-fetching, and a clone plays instantly.
+const AUDIO_CACHE = {};
+const TRIAL_N = {};        // running trial number within each block
+let TRIAL_ORDER = 0;       // running trial number across the whole session, as MouseTracker records
+let PREV = {};             // the trial before, so sequential effects can be tested rather than assumed away
+let MT_SCALE = 1;          // how much the stage had to be scaled down to fit this window
+let SPANISH_EXPOSURE = true;   // set by the exposure question; gates the Spanish vocabulary check
+
+/* Browser interactions. Rodd (2024, Journal of Memory and Language) recommends recording
+   whether participants leave the experiment window or drop out of full screen, because in
+   a long unsupervised session that is the difference between a distracted participant and
+   an attentive one, and it cannot be recovered afterwards. jsPsych logs these events; here
+   they are also counted so the totals land on every row and can be used as a covariate or
+   an exclusion without reprocessing the log. */
+const INTERACT = { blur: 0, focus: 0, fullscreenexit: 0, fullscreenenter: 0, last_blur_ms: null };
+const LAB = { ra: "", participant_name: "", participant_email: "" };   // lab mode only
+const N_PARTS = (CONFIG.LEXTALE_EN || CONFIG.LEXTALE_ES) ? 4 : 3;   // so the headings never lie
+
+function mtTrial(opts) {
+  // opts: {stimHTML, audio, leftLabel, rightLabel, leftIsCorrect, wordOpt, data}
+  return {
+    type: jsPsychHtmlKeyboardResponse,
+    choices: "NO_KEYS",
+    stimulus: function () {
+      const cls = opts.wordOpt ? "mt-target word-opt" : "mt-target";
+      return '<div id="mt-scaler"><div id="mt-stage">' +
+        '<div id="mt-left"  class="' + cls + '" data-side="left">'  + opts.leftLabel  + '</div>' +
+        '<div id="mt-right" class="' + cls + '" data-side="right">' + opts.rightLabel + '</div>' +
+        '<div id="mt-stim"></div>' +
+        '<div id="mt-hint">Click START, then move to your answer without pausing.</div>' +
+        '<div id="mt-start">START</div>' +
+        '</div></div>';
+    },
+    extensions: [{ type: jsPsychExtensionMouseTracking, params: { targets: ["#mt-left", "#mt-right", "#mt-start"] } }],
+    post_trial_gap: CONFIG.ITI,
+    data: Object.assign({ left_label: opts.leftLabel, right_label: opts.rightLabel, left_is_correct: opts.leftIsCorrect }, opts.data),
+    on_load: function () {
+      // Fit the stage to the window as a single scaled unit, so nothing reflows and
+      // nothing is cut off. The factor is recorded, and the geometry written to the
+      // data is measured from the page afterwards, so it is exact either way.
+      (function fit() {
+        const sc = document.getElementById("mt-scaler");
+        if (!sc) return;
+        const avail = Math.min((window.innerWidth - 24) / 960, (window.innerHeight - 90) / 560, 1);
+        MT_SCALE = Math.max(0.55, avail);
+        sc.style.transform = MT_SCALE < 0.999 ? "scale(" + MT_SCALE.toFixed(4) + ")" : "none";
+        sc.style.height = (560 * MT_SCALE + 10) + "px";
+      })();
+      // a label that will not fit its box shrinks instead of spilling over
+      ["left", "right"].forEach(function (s) {
+        const el = document.getElementById("mt-" + s);
+        if (el && !el.classList.contains("word-opt") && (el.textContent || "").length > 16)
+          el.classList.add("long-label");
+      });
+      const stage = document.getElementById("mt-stage");
+      const start = document.getElementById("mt-start");
+      const stim  = document.getElementById("mt-stim");
+      let started = false, t0 = 0, audioEl = null, audioStart = null, audioDur = null, audioFailed = false;
+      const finish = (side) => {
+        const rt = performance.now() - t0;
+        if (audioEl) { try { audioEl.pause(); } catch (e) {} }
+        if (initTimer) clearTimeout(initTimer);
+        if (rtTimer) clearTimeout(rtTimer);
+        jsPsych.finishTrial({ response_side: side, rt: Math.round(rt), jolt_px: Math.round(maxWrongX),
+          correct: (side === "left") === !!opts.leftIsCorrect, started: started, late_start: lateStart,
+          audio_start_ms: audioStart === null ? null : Math.round(audioStart),
+          audio_duration_ms: audioDur,
+          audio_failed: opts.audio ? (audioFailed || audioStart === null) : null,
+          responded_before_offset: (audioStart === null || audioDur === null) ? null
+                                   : (rt < audioStart + audioDur),
+          rt_from_audio_onset:  audioStart === null ? null : Math.round(rt - audioStart),
+          rt_from_audio_offset: (audioStart === null || audioDur === null) ? null : Math.round(rt - audioStart - audioDur) });
+      };
+      let lateStart = false, moved = false, initTimer = null, rtTimer = null;
+      let maxWrongX = 0;   // furthest excursion toward the unchosen side, for the jolt flag
+      const startEl = start.getBoundingClientRect();
+      const midX = startEl.left + startEl.width / 2;
+      const onMove = () => { if (!moved) { moved = true; if (initTimer) clearTimeout(initTimer); } };
+      // Freeman and Ambady screen for "extreme jolting movements toward the incorrect
+      // alternative". We record the size of the excursion rather than rerunning the trial,
+      // because rerunning would change the item counts a within-item design depends on.
+      stage.addEventListener("mousemove", function (e) {
+        const d = Math.abs(e.clientX - midX);
+        if (d > maxWrongX) maxWrongX = d;
+      });
+      start.addEventListener("click", function () {
+        if (started) return;
+        started = true; t0 = performance.now();
+        start.style.visibility = "hidden";
+        document.getElementById("mt-hint").style.visibility = "hidden";
+        if (opts.stimHTML) stim.innerHTML = opts.stimHTML;
+        if (opts.audio) {
+          // Slote & Strand (2016): online audio onset is imprecise and word duration affects
+          // latency, so record when playback actually began and how long it lasted. The fixed
+          // delay before playback keeps the onset comparable across trials and machines.
+          audioEl = AUDIO_CACHE[opts.audio] ? AUDIO_CACHE[opts.audio].cloneNode() : new Audio(opts.audio);
+          audioEl.addEventListener("playing", () => { audioStart = performance.now() - t0; }, { once: true });
+          audioEl.addEventListener("loadedmetadata", () => { audioDur = Math.round(audioEl.duration * 1000); }, { once: true });
+          audioEl.addEventListener("error", () => { audioFailed = true; }, { once: true });
+          setTimeout(function () {
+            const pr = audioEl.play();
+            if (pr && pr.catch) pr.catch(() => { audioFailed = true; });
+          }, CONFIG.AUDIO_DELAY);
+        }
+        stage.addEventListener("mousemove", onMove, { once: true });
+        // A soft reminder if the trial is still open after RT_REMINDER. MouseTracker offers a
+        // hard deadline; a hard deadline would truncate exactly the slow, conflicted trials the
+        // study is about, so this only nudges.
+        rtTimer = setTimeout(function () {
+          const hint = document.getElementById("mt-hint");
+          if (hint) { hint.textContent = "Keep moving to your answer."; hint.style.color = "#9a6700";
+                      hint.style.visibility = "visible"; }
+        }, CONFIG.RT_REMINDER);
+        initTimer = setTimeout(function () {
+          if (!moved) {
+            lateStart = true;
+            const hint = document.getElementById("mt-hint");
+            hint.textContent = "Please begin moving as soon as the trial starts.";
+            hint.style.color = "#b3452f"; hint.style.visibility = "visible";
+          }
+        }, CONFIG.MOUSE.init_deadline);
+      });
+      // On spoken trials the answer areas stay locked until playback has begun, so a
+      // trial can never be answered before the word exists. Mitterer (2025) achieves the
+      // same thing by tying the response objects to the sound.
+      const gate = () => (!opts.audio) || audioStart !== null;
+      if (opts.audio) {
+        ["left", "right"].forEach(s => { const el = document.getElementById("mt-" + s); el.style.opacity = "0.35"; });
+      }
+      const unlock = () => { ["left", "right"].forEach(s => {
+        const el = document.getElementById("mt-" + s); if (el) el.style.opacity = "1"; }); };
+      if (opts.audio) {
+        const iv = setInterval(() => { if (audioStart !== null || audioFailed) { unlock(); clearInterval(iv); } }, 20);
+        setTimeout(() => { unlock(); clearInterval(iv); }, CONFIG.AUDIO_DELAY + 3000);   // never lock forever
+      }
+      ["left", "right"].forEach(side => {
+        document.getElementById("mt-" + side).addEventListener("click", function () {
+          if (started && gate()) finish(side);
+        });
+      });
+      stage.addEventListener("dragstart", e => e.preventDefault());
+    },
+    on_finish: function (d) {
+      // Store the path and the target rectangles as compact, quote-free strings.
+      // Nothing here needs CSV escaping, so the file opens cleanly in R, Python or Excel.
+      TRIAL_N[d.phase] = (TRIAL_N[d.phase] || 0) + 1;
+      d.trial_in_block = TRIAL_N[d.phase];
+      d.trial_order = ++TRIAL_ORDER;
+      d.stage_scale = Math.round(MT_SCALE * 1e4) / 1e4;
+      d.error = (d.correct === true) ? 0 : (d.correct === false ? 1 : null);
+      // the unchosen alternative is the comparison for MAD and AUC, which is what
+      // MouseTracker calls the distractor
+      d.distractor_label = (d.response_side === "left") ? d.right_label : d.left_label;
+      d.distractor_side  = (d.response_side === "left") ? "right" : "left";
+      // Weissman, Jones, McNair and Erb (2026) show that sequential effects in
+      // movement measures can be produced by stimulus repetition and by contingency
+      // rather than by the process of interest. Side is randomised here, so repetition
+      // is at chance and uncorrelated with cell, but recording the previous trial makes
+      // that testable instead of merely argued.
+      const p = PREV[d.phase] || {};
+      d.prev_response_side = p.response_side || "";
+      d.prev_cell          = p.cell || "";
+      d.prev_correct       = (p.correct === undefined) ? "" : p.correct;
+      d.side_repeat        = p.response_side ? (p.response_side === d.response_side) : "";
+      d.cell_repeat        = (p.cell && d.cell) ? (p.cell === d.cell) : "";
+      PREV[d.phase] = { response_side: d.response_side, cell: d.cell, correct: d.correct };
+      if (d.mouse_tracking_data) {
+        d.n_samples = d.mouse_tracking_data.length;
+        d.path = d.mouse_tracking_data.map(s => Math.round(s.x) + " " + Math.round(s.y) + " " + Math.round(s.t)).join(";");
+        delete d.mouse_tracking_data;
+      }
+      // movement decomposed: how long before the hand moved, and how long the move took
+      d.initiation_time = null; d.movement_time = null;
+      if (d.path) {
+        const s = d.path.split(";");
+        if (s.length > 3) {
+          const first = s[0].split(" ").map(Number);
+          let moveT = null;
+          for (let i = 1; i < s.length; i++) {
+            const q = s[i].split(" ").map(Number);
+            if (Math.hypot(q[0] - first[0], q[1] - first[1]) > 12) { moveT = q[2]; break; }
+          }
+          if (moveT !== null) { d.initiation_time = moveT; d.movement_time = d.rt - moveT; }
+        }
+      }
+      d.screen_w = window.innerWidth; d.screen_h = window.innerHeight;
+
+      if (d.mouse_tracking_targets) {
+        const t = d.mouse_tracking_targets, key = { "#mt-left": "left", "#mt-right": "right", "#mt-start": "start" };
+        d.targets = Object.keys(t).map(k => (key[k] || k) + ":" + Math.round(t[k].left) + " " + Math.round(t[k].top) +
+                    " " + Math.round(t[k].width) + " " + Math.round(t[k].height)).join("|");
+        delete d.mouse_tracking_targets;
+      }
+    }
+  };
+}
+
+/* competitor for a word: shares the rime, differs in onset — so the
+   competitor is attractive exactly when the rime is a unit */
+function rimeCompetitor(w) {
+  /* The competitor must share the rime and differ in the onset, so that it is attractive
+     exactly when the rime has become a unit. Cells C and D have rimes occurring in a single
+     word each, by design, so no such competitor exists for their 8 items.
+
+     The fallback used to pick any other word at random. That is worse than having no
+     competitor: 14% of draws then used a competitor from a different cell, and some shared
+     the onset, so the two options differed only in spelling. Those trials silently stopped
+     measuring competition while still being analysed as if they did.
+
+     Now the fallback is constrained -- a different onset and the same cell where possible --
+     and every trial records whether a true rime competitor was available, so the C and D
+     trials can be identified and excluded rather than quietly pooled. */
+  const pool = STIM.words.filter(x => x.rime === w.rime && x.item !== w.item && x.onset !== w.onset);
+  if (pool.length) {
+    const c = pool[Math.floor(Math.random() * pool.length)];
+    return Object.assign({}, c, { true_rime_competitor: true });
+  }
+  let alt = STIM.words.filter(x => x.item !== w.item && x.onset !== w.onset && x.cell === w.cell);
+  if (!alt.length) alt = STIM.words.filter(x => x.item !== w.item && x.onset !== w.onset);
+  const c = alt[Math.floor(Math.random() * alt.length)];
+  return Object.assign({}, c, { true_rime_competitor: false });
+}
+
+/* listening: hear a word, choose between two spellings (target vs rime competitor) */
+function mtListenTrial(w) {
+  const comp = rimeCompetitor(w), leftIsTarget = Math.random() < 0.5;
+  return mtTrial({
+    audio: A(w.item), wordOpt: true,
+    leftLabel:  leftIsTarget ? w.orth : comp.orth,
+    rightLabel: leftIsTarget ? comp.orth : w.orth,
+    leftIsCorrect: leftIsTarget,
+    data: { phase: "mt_listen", modality: "listening", item: w.item, cell: w.cell, rime: w.rime,
+            onset: w.onset, spelling: w.spelling, target_orth: w.orth, is_word: true,
+            competitor: comp.item, competitor_orth: comp.orth, competitor_cell: comp.cell,
+            competitor_rime: comp.rime, competitor_shares_rime: comp.rime === w.rime,
+            true_rime_competitor: comp.true_rime_competitor, competitor_onset: comp.onset,
+            target_side: leftIsTarget ? "left" : "right" }
+  });
+}
+/* reading: see a spelling, choose between two spoken forms played from the
+   two response areas on hover-free click; to keep trajectories clean the
+   options are labelled and their sounds play when the trial starts */
+function mtReadTrial(w) {
+  const comp = rimeCompetitor(w), leftIsTarget = Math.random() < 0.5;
+  return mtTrial({
+    stimHTML: '<p class="word">' + w.orth + '</p>',
+    leftLabel:  leftIsTarget ? "Sound 1" : "Sound 2",
+    rightLabel: leftIsTarget ? "Sound 2" : "Sound 1",
+    leftIsCorrect: leftIsTarget,
+    data: { phase: "mt_read", modality: "reading", item: w.item, cell: w.cell, rime: w.rime,
+            onset: w.onset, spelling: w.spelling, target_orth: w.orth, is_word: true,
+            competitor: comp.item, competitor_orth: comp.orth, competitor_shares_rime: comp.rime === w.rime,
+            true_rime_competitor: comp.true_rime_competitor, competitor_onset: comp.onset,
+            target_side: leftIsTarget ? "left" : "right" }
+  });
+}
+/* lexical decision, mouse-tracked: is this a word of the language? */
+function mtLexicalDecision(item, isWord, modality) {
+  const leftIsYes = Math.random() < 0.5;
+  return mtTrial({
+    stimHTML: modality === "reading" ? '<p class="word">' + item.orth + '</p>' : "",
+    audio: modality === "listening" ? A(item.item) : null,
+    leftLabel:  leftIsYes ? "A WORD" : "NOT A WORD",
+    rightLabel: leftIsYes ? "NOT A WORD" : "A WORD",
+    leftIsCorrect: (leftIsYes === isWord),
+    data: { phase: "mt_ld_" + modality, modality: modality, item: item.item, is_word: isWord,
+            cell: item.cell || "", rime: item.rime || "", onset: item.onset || "",
+            spelling: item.spelling || "", target_orth: item.orth,
+            nonword_rime_cell: item.rime_cell || "", nonword_use: item.use || "",
+            yes_side: leftIsYes ? "left" : "right" }
+  });
+}
+
+/* ============================================================
+   6. TRAINING (unchanged, keyboard-free, button choice with feedback)
+   ============================================================ */
+let currentBlock = 0, blockHistory = [], curTrain = null;
+const wordFoil = w => {
+  const pool = STIM.words.filter(x => x.onset === w.onset && x.rime !== w.rime);
+  const alt = pool.length ? pool : STIM.words.filter(x => x.item !== w.item);
+  return alt[Math.floor(Math.random() * alt.length)];
+};
+const trainTrial = {
+  type: jsPsychAudioButtonResponse,
+  stimulus: () => A(jsPsych.evaluateTimelineVariable("w").item),
+  prompt: '<p style="color:#666">Which spelling matches the word you heard?</p>',
+  choices: function () {
+    const w = jsPsych.evaluateTimelineVariable("w"), foil = wordFoil(w), targetLeft = Math.random() < 0.5;
+    curTrain = { w: w, foil: foil, correct_index: targetLeft ? 0 : 1 };
+    return targetLeft ? [w.orth, foil.orth] : [foil.orth, w.orth];
+  },
+  button_html: (c) => '<button class="jspsych-btn choice">' + c + '</button>',
+  on_finish: d => {
+    d.phase = "training"; d.block = currentBlock; d.item = curTrain.w.item;
+    d.cell = curTrain.w.cell; d.rime = curTrain.w.rime;
+    d.correct_index = curTrain.correct_index; d.correct = (d.response === curTrain.correct_index);
+  }
+};
+const trainFeedback = {
+  type: jsPsychHtmlKeyboardResponse,
+  stimulus: () => {
+    const last = jsPsych.data.getLastTrialData().values()[0];
+    return (last.correct ? '<p class="fb-ok">Correct</p>' : '<p class="fb-no">Not this one</p>') +
+           '<p style="color:#666">This word is written</p><p class="word">' + curTrain.w.orth + '</p>';
+  },
+  choices: "NO_KEYS", trial_duration: 1200,
+  on_finish: d => { d.phase = "training_feedback"; d.block = currentBlock; }
+};
+const blockCounter = { type: jsPsychHtmlKeyboardResponse, stimulus: "", choices: "NO_KEYS", trial_duration: 1,
+  on_finish: d => { currentBlock += 1; d.phase = "block_start"; d.block = currentBlock; } };
+/* DEBUG shortens the training loop as well as everything else. It did not until September
+   2026, and the build guides told you a DEBUG run "shortens the study to a few minutes" --
+   but training kept its real settings, so the shortest possible DEBUG run was still six
+   blocks of 56 trials, about half an hour, and only if you answered well enough to reach the
+   criterion. Anyone following the guide for a quick end-to-end test would have given up or,
+   worse, concluded the study was broken. */
+const DBG_TRAIN = { blockSize: 8, minBlocks: 1, maxBlocks: 2, criterion: 0, consecutive: 1 };
+const TRAIN = CONFIG.DEBUG ? DBG_TRAIN : CONFIG.TRAINING;
+const trainBlock = { timeline: [trainTrial, trainFeedback], timeline_variables: STIM.words.map(w => ({ w })),
+  randomize_order: true, sample: { type: "without-replacement", size: TRAIN.blockSize } };
+/* What to show at a training break, and what to withhold.
+   The percentage IS shown. Training runs 6 to 20 blocks and people differ a lot in how
+   many they need; without a number, a participant on block 12 has no way to tell whether
+   they are improving or failing, and that is where long studies lose people. Seeing the
+   number climb is also the honest picture: it is going up.
+   The CRITERION is NOT shown. Telling someone "two blocks at 90% ends this" turns the
+   learning phase into a target to hit, and the obvious way to hit it is to guess fast on
+   items you are unsure of, which damages exactly the learning the rest of the study
+   measures. So the wording promises an end without naming a threshold.
+   The direction of change is shown from the second block on, because "better than last
+   time" is the information that keeps someone going, and it costs nothing. */
+const blockBreak = {
+  type: jsPsychHtmlButtonResponse, choices: ["Continue"],
+  stimulus: function () {
+    const acc = blockHistory[blockHistory.length - 1] || 0;
+    const prev = blockHistory.length > 1 ? blockHistory[blockHistory.length - 2] : null;
+    const pct = Math.round(acc * 100);
+    let trend = "";
+    if (prev !== null) {
+      const d = pct - Math.round(prev * 100);
+      trend = d > 2 ? '<p class="fb-ok">That is better than the block before.</p>'
+            : d < -2 ? '<p style="color:#555">A little below the block before. That is normal; it moves around.</p>'
+            : '<p style="color:#555">About the same as the block before.</p>';
+    }
+    return '<div class="prose"><h3>Round ' + currentBlock + ' finished</h3>' +
+      '<p>You got <b>' + pct + '%</b> of them right.</p>' + trend +
+      (currentBlock <= 2
+        ? '<p>Almost nobody does well in the first rounds. The words are new and you are still guessing; ' +
+          'that is what the feedback after each one is for.</p>'
+        : '') +
+      '<p>This part ends by itself once you are reliably accurate, so how long it lasts is up to you ' +
+      'rather than fixed in advance. Most people need somewhere between 6 and 20 rounds.</p>' +
+      '<p style="color:#555">Rest here as long as you like. Nothing is timed on this screen.</p></div>';
+  },
+  on_finish: d => { d.phase = "block_break"; d.block = currentBlock; d.block_accuracy = blockHistory[blockHistory.length - 1]; }
+};
+const trainingLoop = {
+  timeline: [blockCounter, trainBlock, blockBreak],
+  loop_function: function () {
+    const bd = jsPsych.data.get().filter({ phase: "training", block: currentBlock });
+    blockHistory.push(bd.count() ? bd.select("correct").mean() : 0);
+    if (currentBlock >= TRAIN.maxBlocks) return false;
+    if (currentBlock >= TRAIN.minBlocks) {
+      const recent = blockHistory.slice(-TRAIN.consecutive);
+      if (recent.length === TRAIN.consecutive && recent.every(a => a >= TRAIN.criterion)) return false;
+    }
+    return true;
+  }
+};
+
+/* ============================================================
+   6b. LexTALE, English and Spanish
+   Lemhofer & Broersma (2012); Izura, Cuetos & Brysbaert (2014).
+   Run in the same START-then-move geometry as the main task, so the
+   trajectories are directly comparable with the artificial-lexicon blocks.
+   ============================================================ */
+function lexTrial(item, lang, isPractice) {
+  const yesLeft = Math.random() < 0.5;
+  return mtTrial({
+    stimHTML: '<p style="font-size:44px;font-family:Georgia,serif">' + item.w + '</p>',
+    leftLabel:  yesLeft ? "YES, a real word" : "NO, not a word",
+    rightLabel: yesLeft ? "NO, not a word"  : "YES, a real word",
+    leftIsCorrect: (yesLeft === (item.is_word === 1)),
+    data: { phase: isPractice ? "lextale_practice" : ("lextale_" + lang),
+            item: item.w, is_word: item.is_word, language: lang,
+            yes_side: yesLeft ? "left" : "right", n_letters: item.w.length }
+  });
+}
+function lexTaleBlock(lang) {
+  const set = (lang === "en") ? LEXTALE.en : LEXTALE.sp;
+  const label = (lang === "en") ? "English" : "Spanish";
+  const intro = {
+    type: jsPsychHtmlButtonResponse, choices: ["I understand, start the practice"],
+    stimulus: '<div class="prose"><h2>Part ' + N_PARTS + ' of ' + N_PARTS + ': a short ' + label + ' vocabulary check</h2>' +
+      '<p>This part has nothing to do with the invented language. It is a standard test of how many ' +
+      label + ' words you know, and it takes about five minutes.</p>' +
+      '<p><b>What you will see.</b> One letter string at a time, in the middle of the screen. Some are real ' +
+      label + ' words. Others are made-up strings that follow ' + label + ' spelling rules but are not words.</p>' +
+      '<p><b>What to do.</b> Click <b>START</b> at the bottom, then move the mouse to <b>YES, a real word</b> ' +
+      'if you are sure it is a ' + label + ' word, or to <b>NO, not a word</b> if you are not.</p>' +
+      '<p><b>Please do not guess.</b> Answering YES to a made-up string counts against your score, so if you ' +
+      'are unsure, answer NO. There is no time limit, but work at a comfortable pace and keep the mouse moving.</p>' +
+      '<p>Eight practice items come first, with feedback. The real test follows, without feedback.</p>' +
+      (lang === "sp"
+        ? '<p style="color:#5a5a5a"><b>Many people recognise only a few of these, and some ' +
+          'recognise almost none. That is expected, and a low score is just as useful to us as ' +
+          'a high one.</b> The one thing that is not useful is guessing, so please answer NO ' +
+          'whenever you are unsure.</p>'
+        : '') +
+      '</div>',
+    data: { phase: "lextale_instructions", language: lang }
+  };
+  const practice = [];
+  shuffle(set.practice.slice()).forEach(it => {
+    practice.push(lexTrial(it, lang, true));
+    practice.push({
+      type: jsPsychHtmlKeyboardResponse, choices: "NO_KEYS", trial_duration: 1100,
+      stimulus: function () {
+        const last = jsPsych.data.getLastTrialData().values()[0];
+        return (last.correct ? '<p class="fb-ok">Correct</p>' : '<p class="fb-no">Not quite</p>') +
+               '<p style="color:#666">' + (last.is_word ? "That is a real word." : "That is not a real word.") + '</p>';
+      },
+      data: { phase: "lextale_practice_feedback", language: lang }
+    });
+  });
+  const ready = { type: jsPsychHtmlButtonResponse, choices: ["Begin the test"],
+    stimulus: '<div class="prose"><p>That is the practice. The test itself has ' + set.test.length +
+      ' items and gives no feedback. Same rule: YES only when you are sure it is a real ' + label + ' word.</p></div>' };
+  let test = shuffle(set.test.slice()).map(it => lexTrial(it, lang, false));
+  if (CONFIG.DEBUG) test = test.slice(0, 6);
+  return [intro].concat(practice, [ready], test);
+}
+
+/* ============================================================
+   7. TIMELINE
+   ============================================================ */
+const timeline = [];
+timeline.push({ type: jsPsychBrowserCheck, inclusion_function: d => d.width >= 1000 && d.height >= 700 && !d.mobile,
+  exclusion_message: () => '<p>This study needs a laptop or desktop with a separate mouse and a window at least 1000 by 700 pixels.</p>' });
+
+/* ---- consent, with eligibility checks that must all be ticked ---- */
+const CONSENT_ITEMS = [
+  "I am in a <b>quiet room</b>. There is no television, music, conversation, or background noise where I am sitting, and I will not be interrupted for the next two hours.",
+  "I am using a desktop or laptop computer with a <b>separate mouse</b>. A laptop trackpad or a touchscreen will not work for this study.",
+  "I can hear my computer clearly, through headphones, earbuds, or speakers.",
+  "My hearing is normal.",
+  "My vision is normal, or corrected to normal with glasses or contact lenses.",
+  "I have no history of brain injury or neurological illness, and I am not taking medication that affects attention or alertness.",
+  "I am 18 years of age or older."
+];
+timeline.push({
+  type: jsPsychHtmlButtonResponse,
+  choices: ["I agree to take part"],
+  button_html: (c) => '<button class="jspsych-btn" id="consent-go" disabled style="opacity:.45">' + c + '</button>',
+  stimulus:
+    '<div class="prose" style="max-width:820px">' +
+    '<h2>Consent to take part in research</h2>' +
+    '<p><b>Study title.</b> How readers learn the units of a new writing system</p>' +
+    '<p><b>Researchers.</b> Yu-Cheng Lin, PhD, and Hitomi Kambara, PhD, ' + CONFIG.LAB_NAME + ', ' +
+    'The University of Texas Rio Grande Valley</p>' +
+    '<p><b>What this study is about.</b> We are studying how people learn to read a writing system they have never ' +
+    'seen before, and what parts of a written word they come to treat as units.</p>' +
+    '<p><b>What you will do.</b> You will learn 56 short words of an invented language, first by hearing them and ' +
+    'then by learning how they are spelled in an invented alphabet. You will then make quick decisions about those ' +
+    'words by moving the mouse to your answer. At the end you will be sent to a short questionnaire about your ' +
+    'language background and reading history. How long the study takes depends on how quickly you learn ' + 'the words: for most people between 60 and 105 minutes, and up to two hours for a few.</p>' +
+    '<p><b>What we record.</b> Your key presses and mouse clicks, the path your cursor takes on the screen, how long ' +
+    'you take to respond, and your answers. We do not record audio, video, or images of you, and we do not ask for ' +
+    'your name. Your data are labeled with a random code, not with anything that identifies you.</p>' +
+    '<p><b>Risks and benefits.</b> The risks are no greater than those of ordinary computer use. You may find the ' +
+    'learning phase tiring; you can rest between blocks. There is no direct benefit to you, but the study will help ' +
+    'us understand how reading is learned.</p>' +
+    '<p><b>What you receive.</b> Research credit through the UTRGV SONA system. ' +
+    (CONFIG.MODE === "lab"
+      ? 'The research assistant records your participation at the end of the session.</p>'
+      : 'Credit is granted after the final questionnaire.</p>') +
+    '<p><b>The study has several parts and they must be done in one sitting.</b> After you begin, please do not ' +
+    'close the window, refresh the page, or let the computer go to sleep until you reach the final page of the ' +
+    'questionnaire that follows. The parts are saved together at the end, so a session that stops partway through ' +
+    'cannot be resumed and leaves us with data we cannot use. Please set aside two hours before you start, ' + 'even though most people finish sooner.</p>' +
+    '<p><b>Taking part is voluntary.</b> You may stop at any time by closing the window, and you do not have to ' +
+    'give a reason.</p>' +
+    '<p><b>Questions.</b> Contact Yu-Cheng Lin at yucheng.lin@utrgv.edu.</p>' +
+    '<hr style="margin:22px 0">' +
+    '<p><b>Before you begin, please confirm each of the following.</b></p>' +
+    '<div id="consent-list" style="line-height:2">' +
+    CONSENT_ITEMS.map((t, i) => '<label style="display:block;cursor:pointer"><input type="checkbox" class="cbx" ' +
+      'data-i="' + i + '" style="margin-right:10px;transform:scale(1.25)">' + t + '</label>').join('') +
+    '</div>' +
+    '<p style="margin-top:18px"><label style="cursor:pointer"><input type="checkbox" id="cbx-consent" ' +
+    'style="margin-right:10px;transform:scale(1.25)"><b>I have read the information above and I agree to take part ' +
+    'in this study.</b></label></p>' +
+    '<p id="consent-note" style="color:#b3452f">Please check every box above to continue. If any of them is not ' +
+    'true for you, please close this window instead; that is completely fine.</p>' +
+    '</div>',
+  data: { phase: "consent" },
+  on_load: function () {
+    const boxes = Array.from(document.querySelectorAll('.cbx')).concat([document.getElementById('cbx-consent')]);
+    const go = document.getElementById('consent-go');
+    const note = document.getElementById('consent-note');
+    const check = () => {
+      const all = boxes.every(b => b.checked);
+      go.disabled = !all;
+      go.style.opacity = all ? 1 : .45;
+      note.textContent = all ? "Thank you. Click below to begin." : note.textContent;
+      note.style.color = all ? "#1a7f37" : "#b3452f";
+    };
+    boxes.forEach(b => b.addEventListener('change', check));
+  },
+  on_finish: function (d) { d.consent_given = true; }
+});
+
+/* ---- has this computer run the study before? ------------------------------
+   A note, not a barrier. In the lab the same computer runs session after session,
+   so a previous completion on this machine is normal and expected. And if someone
+   could not finish the first time, the assistant is meant to let them try again.
+   The link can be opened as many times as you like.
+   What this screen does is make a genuine repeat visible rather than silent: the
+   attempt number is recorded, so a participant who has really seen the language
+   before can be identified in the data instead of quietly diluting the effect. */
+const DONE_KEY = "artificial_lexicon_sessions";
+function priorSessions() {
+  try { return JSON.parse(window.localStorage.getItem(DONE_KEY) || "[]"); } catch (e) { return []; }
+}
+timeline.unshift({
+  timeline: [{
+    type: jsPsychHtmlButtonResponse,
+    /* Two wordings. In the lab this screen is read by the assistant, for whom a previous session
+       on the machine is routine. Remotely it is read by the participant on their own computer,
+       and until 24 September 2026 they got the assistant's text ("In a lab that is normal"),
+       which asks them to judge "this person" -- themselves -- in the third person. The answer
+       is recorded the same way in both: button 0 is a first session, button 1 a repeat. */
+    choices: function () {
+      return CONFIG.MODE === "lab"
+        ? ["Continue", "This person has done it before, note that and continue"]
+        : ["No, this is my first time", "Yes, I have done this study before"];
+    },
+    stimulus: function () {
+      const n = priorSessions().length;
+      if (CONFIG.MODE !== "lab")
+        return '<div class="prose"><h3>Have you taken part in this study before?</h3>' +
+          '<p>This computer has been used for this study before. That can happen for many reasons, ' +
+          'so we simply ask.</p>' +
+          '<p>If you started it once and could not finish, answer <b>yes</b>. You can still take part, ' +
+          'and your answer does not affect your credit.</p></div>';
+      return '<div class="prose"><h3>This computer has run the study before</h3>' +
+        '<p>' + n + ' completed session' + (n === 1 ? '' : 's') + ' on this machine. In a lab that is ' +
+        'normal, and it usually means nothing.</p>' +
+        '<p><b>Choose the second option only if this same participant has taken part before</b>, ' +
+        'for instance because a first attempt did not finish. That is allowed, and the data will be ' +
+        'marked so the analysis can take account of it.</p></div>';
+    },
+    data: { phase: "repeat_check" },
+    on_finish: function (d) {
+      d.repeat_participant = (d.response === 1);
+      jsPsych.data.addProperties({ repeat_participant: d.repeat_participant });
+    }
+  }],
+  conditional_function: function () { return priorSessions().length > 0; }
+});
+
+/* ---- lab mode: the assistant records the session, then hands over ---- */
+if (CONFIG.MODE === "lab") {
+  timeline.unshift({
+    type: jsPsychHtmlButtonResponse, choices: ["Start the session"],
+    button_html: (c) => '<button class="jspsych-btn" id="lab-go" disabled style="opacity:.45">' + c + '</button>',
+    stimulus: '<div class="prose"><h3>Session setup</h3>' +
+      '<p style="color:#555">For the research assistant. Fill this in before the participant sits down.</p>' +
+      /* The only way a remote participant sees this screen is a SONA or Prolific link that has
+         lost its participant code -- a setup error. Say so here, so they stop and report it
+         instead of typing a made-up assistant's name and carrying on. */
+      '<p style="color:#8a4b00;background:#fff4e0;padding:8px 12px;border-radius:6px;font-size:15px">' +
+      '<b>Taking part from home?</b> You should not see this page. The link you were given is ' +
+      'missing its participant code. Please close this window and write to yucheng.lin@utrgv.edu.</p>' +
+      '<p><label><b>Your full name</b><br>' +
+      '<input id="lab-ra" type="text" size="30" autocomplete="off" placeholder="for example, Marco Delgado" ' +
+      'style="font-size:18px;padding:6px"></label></p>' +
+      '<p><label><b>Participant\'s full name</b>, as SONA shows it<br>' +
+      '<input id="lab-pname" type="text" size="30" autocomplete="off" style="font-size:18px;padding:6px"></label></p>' +
+      '<p><label><b>Participant\'s UTRGV email</b><br>' +
+      '<input id="lab-pemail" type="email" size="30" autocomplete="off" placeholder="name@utrgv.edu" ' +
+      'style="font-size:18px;padding:6px"></label></p>' +
+      '<p id="lab-note" style="color:#b3452f">Fill in all three.</p>' +
+      '<p style="color:#777;font-size:14px">The date and time are recorded automatically. You do not need ' +
+      'to type them, and you do not need to write anything on paper.</p>' +
+      '<hr style="margin:18px 0"><p style="color:#555;font-size:15px"><b>Before you hand over:</b> ' +
+      'headphones on, a real mouse on the side they write with, the room quiet, the door closed. ' +
+      'Usually 60 to 105 minutes, occasionally up to two hours, and it cannot be paused.</p></div>',
+    data: { phase: "lab_setup" },
+    on_load: function () {
+      const r = document.getElementById("lab-ra"), n = document.getElementById("lab-pname"),
+            e = document.getElementById("lab-pemail"), go = document.getElementById("lab-go"),
+            note = document.getElementById("lab-note");
+      const check = () => {
+        const ra = r.value.trim(), nm = n.value.trim(), em = e.value.trim();
+        const emailOK = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
+        const ok = ra.length > 1 && nm.length > 1 && emailOK;
+        go.disabled = !ok; go.style.opacity = ok ? 1 : .45;
+        note.textContent = ok ? "Ready. Hand the mouse to the participant."
+          : (em.length > 0 && !emailOK) ? "That does not look like a complete email address."
+          : "Fill in all three.";
+        note.style.color = ok ? "#1a7f37" : "#b3452f";
+        LAB.ra = ra; LAB.participant_name = nm; LAB.participant_email = em;
+      };
+      [r, n, e].forEach(el => el.addEventListener("input", check));
+      check(); setTimeout(() => r.focus(), 50);
+    },
+    on_finish: function (d) {
+      d.ra = LAB.ra;
+      d.participant_name = LAB.participant_name;
+      d.participant_email = LAB.participant_email;
+      SUBJECT.external_id = LAB.participant_email || SUBJECT.external_id;
+      jsPsych.data.addProperties({ external_id: SUBJECT.external_id, ra: LAB.ra,
+                                   participant_name: LAB.participant_name,
+                                   participant_email: LAB.participant_email, setting: "lab" });
+    }
+  });
+}
+
+/* ---- pointing device: a real mouse is required ---- */
+timeline.push({
+  type: jsPsychHtmlButtonResponse,
+  choices: ["I am using a separate mouse", "I am using a trackpad or touchscreen"],
+  stimulus: '<div class="prose"><h3>One more check before we start</h3>' +
+    '<p>This study measures the path your hand takes as you move the cursor, so it needs a ' +
+    '<b>separate mouse</b>. A laptop trackpad moves the cursor in short repeated strokes rather than ' +
+    'one continuous motion, and a touchscreen has no path at all, so neither can be used here.</p>' +
+    '<p>If you have a mouse nearby, plug it in now and use it for the rest of the study.</p></div>',
+  data: { phase: "device_declared" },
+  on_finish: function (d) { d.uses_mouse = (d.response === 0); }
+});
+timeline.push({
+  timeline: [{
+    type: jsPsychHtmlButtonResponse, choices: ["Exit"],
+    stimulus: '<div class="prose"><p>Thank you for your interest. This study needs a separate mouse, so ' +
+      'we cannot include this session. If you can find a mouse, you are very welcome to start again ' +
+      'from the beginning.</p></div>',
+    data: { phase: "excluded_no_mouse" },
+    on_finish: function () { jsPsych.abortExperiment(); }
+  }],
+  conditional_function: function () {
+    const last = jsPsych.data.get().filter({ phase: "device_declared" }).values().slice(-1)[0];
+    if (last && last.uses_mouse === false) { jsPsych.data.addProperties({ excluded: "no_mouse" }); return true; }
+    return false;
+  }
+});
+
+timeline.push({ type: jsPsychFullscreen, fullscreen_mode: true, message: '<p>The study will now switch to full screen.</p>',
+  on_finish: () => checkpoint("consent") });
+
+/* frame rate, measured once: reported with the data so that sampling differences
+   between machines can be checked at analysis time */
+timeline.push({
+  type: jsPsychHtmlKeyboardResponse, stimulus: '<p>Preparing…</p>', choices: "NO_KEYS", trial_duration: 700,
+  data: { phase: "frame_rate" },
+  on_load: function () {
+    let n = 0, t0 = performance.now();
+    const tick = () => { n++; if (performance.now() - t0 < 600) requestAnimationFrame(tick);
+      else jsPsych.data.addProperties({ frame_rate: Math.round(n / ((performance.now() - t0) / 1000)) }); };
+    requestAnimationFrame(tick);
+  }
+});
+
+timeline.push({ type: jsPsychHtmlButtonResponse, choices: ["The sound is comfortable"],
+  stimulus: '<div class="prose"><h2>Sound check</h2><p><b>Please put on headphones or earbuds now.</b></p>' +
+    '<p><button id="playtest" class="jspsych-btn playbtn" type="button">Play test sound</button></p></div>',
+  on_load: () => document.getElementById("playtest").addEventListener("click", () => playTone(440, -3, false)),
+  data: { phase: "volume_setting" } });
+timeline.push({ type: jsPsychHtmlButtonResponse, choices: ["Start the check"],
+  stimulus: '<div class="prose"><p>Six trials, three tones each. Click the tone that sounded <b>quietest</b>.</p></div>' });
+timeline.push(...headphoneTrials);
+
+/* Second attempt, only for someone who missed the criterion on the first. The screen names the
+   four faults that actually cause this, because a participant who is told only "you failed"
+   has nothing to act on. */
+timeline.push({
+  timeline: [
+    { type: jsPsychHtmlButtonResponse, choices: ["Try the check again"],
+      stimulus: '<div class="prose"><h2>Let us try that once more</h2>' +
+        '<p>That did not come through clearly. Before trying again, please check:</p><ul>' +
+        '<li>headphones or earbuds are plugged in, and <b>both</b> sides are in your ears</li>' +
+        '<li>the plug is fully seated, in the headphone socket rather than the microphone socket</li>' +
+        '<li>if the headset is wireless, that it is connected and not also playing through the computer</li>' +
+        '<li>the system volume is at a comfortable level, not muted</li></ul>' +
+        '<p><button id="playtest2" class="jspsych-btn playbtn" type="button">Play test sound</button> ' +
+        'You should hear this in both ears.</p></div>',
+      on_load: () => document.getElementById("playtest2")
+        .addEventListener("click", () => playTone(440, -3, false)),
+      data: { phase: "headphone_retry_prompt" } },
+    ...headphoneRetrial
+  ],
+  conditional_function: () => hpScore(1) < 5
+});
+
+/* The rule is the same for everyone, in the laboratory and online: pass the listening check on
+   one of the two attempts, or the session does not continue. It is a condition of taking part,
+   not an exclusion applied afterwards, so no participant in the collected file failed it and
+   the analysis never has to decide what to do with one who did. The best of the two scores is
+   recorded for every participant either way, so it remains available as a covariate. */
+timeline.push({
+  timeline: [{ type: jsPsychHtmlButtonResponse, choices: ["Exit"],
+    stimulus: '<div class="prose"><p>Thank you for your interest. The listening check suggests the ' +
+      'sound is not reaching you clearly enough for the parts of this study that involve listening, so we ' +
+      'cannot include this session.</p><p>If you can move to a quieter room or use headphones, you are very ' +
+      'welcome to start again from the beginning.</p></div>',
+    data: { phase: "excluded_headphones" }, on_finish: () => jsPsych.abortExperiment() }],
+  conditional_function: () => {
+    const a1 = hpScore(1), a2 = hpScore(2), best = Math.max(a1, a2);
+    jsPsych.data.addProperties({ listening_check_score: best, listening_check_attempt1: a1,
+                                 listening_check_attempts: (a1 < 5 ? 2 : 1) });
+    if (best < 5) {
+      jsPsych.data.addProperties({ listening_check_passed: false, excluded: "headphone_check" });
+      /* In DEBUG the session continues anyway, so a test run can be completed without pressing
+         the right buttons on a check that is not what is being tested. Real sessions never take
+         this branch, and the row is flagged either way: DEBUG files also carry debug = true. */
+      return !CONFIG.DEBUG;
+    }
+    jsPsych.data.addProperties({ listening_check_passed: true });
+    return false;
+  }
+});
+
+const ALL_AUDIO = STIM.words.map(w => A(w.item))
+  .concat(STIM.nonwords.filter(n => n.use === "auditory").map(n => A(n.item)))
+  .concat([...new Set(STIM.transfer.map(t => A(t.audio_item)))]);
+const AUDIO_FAILED = [];
+timeline.push({ type: jsPsychPreload, audio: ALL_AUDIO,
+  message: '<p>Loading the study. This takes up to a minute on a slow connection.</p>',
+  max_load_time: 180000, continue_after_error: true, show_progress_bar: true,
+  on_error: (f) => { AUDIO_FAILED.push(f); },
+  on_finish: function () {
+    // Fill the playback cache from the preloaded files. A clone of a loaded element
+    // starts instantly, which is what makes the fixed audio onset reliable in Safari.
+    ALL_AUDIO.forEach(function (u) {
+      try { const a = new Audio(u); a.preload = "auto"; AUDIO_CACHE[u] = a; } catch (e) {}
+    });
+    jsPsych.data.addProperties({ audio_files_failed: AUDIO_FAILED.length });
+  }
+});
+// If any sound failed to load, say so plainly rather than letting silent trials happen.
+timeline.push({
+  timeline: [{
+    type: jsPsychHtmlButtonResponse, choices: ["Try again"],
+    stimulus: function () {
+      return '<div class="prose"><h3>Some sounds did not load</h3>' +
+        '<p>' + AUDIO_FAILED.length + ' of ' + ALL_AUDIO.length + ' sound files could not be downloaded. ' +
+        'This is almost always a slow or interrupted connection rather than anything you did.</p>' +
+        '<p>Please check you are online, then click <b>Try again</b>. If it keeps happening, ' +
+        (CONFIG.MODE === "lab" ? 'tell the research assistant.' : 'write to yucheng.lin@utrgv.edu.') +
+        '</p></div>';
+    },
+    data: { phase: "audio_load_failed" },
+    on_finish: () => { window.location.reload(); }
+  }],
+  conditional_function: () => AUDIO_FAILED.length > 0
+});
+
+const famList = shuffle(STIM.words.concat(STIM.words));
+timeline.push({ type: jsPsychHtmlButtonResponse, choices: ["Begin"],
+  stimulus: '<div class="prose"><h2>Part 1 of ' + N_PARTS + ': listen to the language</h2>' +
+    '<p>You are about to learn a small invented language. It has 56 short words, and each one is written in an alphabet you have never seen before.</p>' +
+    '<p><b>Right now, just listen.</b> You will hear all 56 words, twice each, one after another. Nothing to press, nothing to decide. This takes about five minutes.</p>' +
+    '<p>Your only job is to let the sounds become familiar. You are not expected to memorise them yet, and you will not be tested on this part.</p>' +
+    '<p><b>Please keep your headphones on for the whole study.</b></p></div>' });
+timeline.push({ timeline: [{ type: jsPsychAudioKeyboardResponse, stimulus: jsPsych.timelineVariable("audio"),
+    choices: "NO_KEYS", trial_ends_after_audio: true, post_trial_gap: 350,
+    data: { phase: "familiarisation", item: jsPsych.timelineVariable("item") } }],
+  timeline_variables: (CONFIG.DEBUG ? famList.slice(0, 6) : famList).map(w => ({ audio: A(w.item), item: w.item })) });
+
+timeline.push({ type: jsPsychHtmlButtonResponse, choices: ["Begin"],
+  stimulus: '<div class="prose"><h2>Part 2 of ' + N_PARTS + ': learn how the words are written</h2>' +
+    '<p>Now you will learn the spellings. On each trial you will <b>hear one word</b> and see <b>two spellings</b> side by side. Click the one you think is correct.</p>' +
+    '<p>You will not know the answers at first, so guess. After every choice you will be shown the correct spelling, and that is how you learn.</p>' +
+    '<p><b>How long this part lasts is up to you.</b> Trials come in blocks of 56. After each block you will see how accurate you were and can rest. ' +
+    'As soon as you are 90% accurate in two blocks in a row, this part ends. Most people need between 6 and 20 blocks.</p>' +
+    '<p>Take it seriously: everything after this depends on having learned the spellings.</p></div>' });
+timeline.push(trainingLoop);
+
+/* ---- mouse-tracking test ---- */
+const readWords   = STIM.words.filter(w => modalityFor(w.rime) === "read");
+const listenWords = STIM.words.filter(w => modalityFor(w.rime) === "listen");
+// Nonwords are now split by modality at the materials level, not by chance. Half of the
+// nonwords in each block carry a rime the participant has been trained on, evenly drawn
+// from both cells, so "this rime is familiar, therefore it is a word" is wrong as often
+// as it is right and cannot favour either cell. Visual nonwords are only ever seen and
+// auditory ones only ever heard, which is what makes those trained rimes possible without
+// colliding with a real word of the language.
+const NW_READ   = shuffle(STIM.nonwords.filter(n => n.use === "visual"));
+const NW_LISTEN = shuffle(STIM.nonwords.filter(n => n.use === "auditory"));
+
+// A short screen between blocks: what you just finished, where you are, what is next.
+// Participants who know where they are in a long study finish it far more often than
+// participants who do not.
+const BLOCK_ORDER = ["Reading", "Listening", "Matching", "Final task"];
+function blockDone(justFinished) {
+  const i = BLOCK_ORDER.indexOf(justFinished);
+  const next = BLOCK_ORDER[i + 1];
+  const NEXT_NAME = { "Reading": "reading", "Listening": "listening", "Matching": "matching",
+                      "Final task": "new words" };
+  return {
+    type: jsPsychHtmlButtonResponse,
+    choices: [next ? "Continue" : "Continue"],
+    stimulus: '<div class="prose"><h3>Block ' + (i + 1) + ' of 4 finished</h3>' +
+      '<p>That is the <b>' + NEXT_NAME[justFinished] + '</b> block done.</p>' +
+      (next ? '<p>Next is block ' + (i + 2) + ' of 4, the <b>' + NEXT_NAME[next] + '</b> block. ' +
+              'It is explained on the next screen.</p>' +
+              '<p style="color:#555">Take a moment if you want one. There is no timer on this screen.</p>'
+            : '<p>That is the last block of the invented language.</p>') +
+      '</div>',
+    data: { phase: "block_done", finished_block: justFinished }
+  };
+}
+
+const BLOCK_TEXT = {
+  "Reading": '<h3>Block 1 of 4: reading</h3>' +
+    '<p>A <b>written</b> string will appear in the invented alphabet. Decide whether it is one of the 56 words you learned.</p>' +
+    '<p>Move to <b>A WORD</b> if you recognise it, or to <b>NOT A WORD</b> if you do not. Half the strings are words you learned; half are not.</p>',
+  "Listening": '<h3>Block 2 of 4: listening</h3>' +
+    '<p>This time you will <b>hear</b> a spoken form rather than see one. Decide whether it is one of the words you learned.</p>' +
+    '<p>Move to <b>A WORD</b> or <b>NOT A WORD</b>. You may answer while the sound is still playing.</p>',
+  "Matching": '<h3>Block 3 of 4: matching</h3>' +
+    '<p>You will <b>hear a word</b> and see <b>two spellings</b>. Move to the spelling that matches what you heard.</p>' +
+    '<p>The two spellings are deliberately similar, so look carefully.</p>',
+  "Final task": '<h3>Block 4 of 4: new words</h3>' +
+    '<p>These are <b>new words</b> of the same language — none of them is one of the 56 you learned. You will hear one and see two possible spellings.</p>' +
+    '<p>Neither is right or wrong, because these words are new. Move to whichever <b>looks like it belongs</b> to the language you learned. Trust your first impression.</p>'
+};
+const mtInstructions = (what) => ({ type: jsPsychHtmlButtonResponse, choices: ["Begin this block"],
+  stimulus: '<div class="prose">' + (BLOCK_TEXT[what] || ('<h3>' + what + '</h3>')) +
+    '<p style="color:#555">The movement is the same one you practised: click <b>START</b>, start moving ' +
+    'immediately, then click your answer at the top.</p></div>',
+  data: { phase: "block_instructions", block: what } });
+
+function readingBlock() {
+  let t = readWords.map(w => mtLexicalDecision(w, true, "reading"))
+        .concat(NW_READ.map(n => mtLexicalDecision(n, false, "reading")));
+  t = shuffle(t); if (CONFIG.DEBUG) t = t.slice(0, 6);
+  return [mtInstructions("Reading")].concat(withChecks(t, 2));
+}
+function listeningBlock() {
+  let t = listenWords.map(w => mtLexicalDecision(w, true, "listening"))
+        .concat(NW_LISTEN.map(n => mtLexicalDecision(n, false, "listening")));
+  t = shuffle(t); if (CONFIG.DEBUG) t = t.slice(0, 6);
+  return [mtInstructions("Listening")].concat(withChecks(t, 2));
+}
+/* auditory transfer: hear a novel word, choose between the cell-A spelling and an
+   alternative spelling of the same rime. If the cell-A spelling is a unit, it should
+   attract the cursor even for words never seen before. */
+function mtTransferTrial(pair, leftIsPrimary) {
+  /* The side is passed in, not drawn here. Each pair appears twice and the two
+     presentations take opposite sides, which is what the design says and what an
+     independent coin per trial does not deliver: 18% of participants would have got a
+     10/4 split or worse, and about one in two thousand would see the primary spelling on
+     the same side all fourteen times. For that participant a preference for the primary
+     spelling is indistinguishable from a preference for one side of the screen. */
+  const prim = pair.primary, alt = pair.alt;
+  return mtTrial({
+    audio: A(prim.audio_item), wordOpt: true,
+    leftLabel:  leftIsPrimary ? prim.orth : alt.orth,
+    rightLabel: leftIsPrimary ? alt.orth : prim.orth,
+    leftIsCorrect: leftIsPrimary,          // "correct" here means the primary spelling
+    data: { phase: "mt_transfer", modality: "listening", item: prim.item, cell: prim.cell,
+            rime: prim.phon ? prim.phon.slice(1) : "", target_orth: prim.orth,
+            alt_item: alt.item, alt_orth: alt.orth, spelling: prim.spelling,
+            primary_side: leftIsPrimary ? "left" : "right" }
+  });
+}
+function transferPairs() {
+  const byKey = {};
+  STIM.transfer.forEach(t => { const k = t.cell + "_" + t.phon; (byKey[k] = byKey[k] || []).push(t); });
+  return Object.values(byKey).filter(v => v.length >= 2).map(v => ({
+    primary: v.find(x => x.spelling === "primary") || v[0],
+    alt:     v.find(x => x.spelling !== "primary") || v[1]
+  }));
+}
+function transferBlock() {
+  // Each pair is presented twice, with the side of the primary spelling counterbalanced
+  // across the two presentations. Eight pairs -- four per cell -- give sixteen trials. It
+  // was seven pairs and fourteen trials until September 2026, not by design: one cell-B
+  // pair carried a different pronunciation for each of its two spellings, so it never
+  // paired and the block silently ran unbalanced, three pairs against four.
+  const pairs = transferPairs();
+  // build each pair twice, once with the primary on the left and once on the right,
+  // then shuffle the ORDER only
+  const built = [];
+  pairs.forEach(p => { built.push([p, true]); built.push([p, false]); });
+  let t = shuffle(built).map(([p, leftIsPrimary]) => mtTransferTrial(p, leftIsPrimary));
+  if (CONFIG.DEBUG) t = t.slice(0, 4);
+  return [mtInstructions("Final task")].concat(t);
+}
+
+/* attention check in the same geometry as a real trial, so it cannot be
+   answered without engaging with the task */
+function mtAttentionCheck() {
+  const wantLeft = Math.random() < 0.5;
+  return mtTrial({
+    stimHTML: '<p style="font-size:24px">Attention check: click the <b>' + (wantLeft ? "LEFT" : "RIGHT") + '</b> box.</p>',
+    leftLabel: "LEFT", rightLabel: "RIGHT", leftIsCorrect: wantLeft,
+    data: { phase: "attention_check", wanted: wantLeft ? "left" : "right" }
+  });
+}
+function withChecks(trials, n) {
+  const out = trials.slice(), gap = Math.max(1, Math.floor(out.length / (n + 1)));
+  for (let i = n; i >= 1; i--) out.splice(Math.min(i * gap, out.length), 0, mtAttentionCheck());
+  return out;
+}
+
+function competitionBlock() {
+  let t = shuffle(STIM.words.slice()).map(mtListenTrial);
+  if (CONFIG.DEBUG) t = t.slice(0, 6);
+  return [mtInstructions("Matching")].concat(withChecks(t, 2));
+}
+timeline.push({ type: jsPsychHtmlKeyboardResponse, stimulus: "", choices: "NO_KEYS",
+  trial_duration: 1, data: { phase: "checkpoint", checkpoint: "training" },
+  on_finish: () => checkpoint("training") });
+timeline.push({ type: jsPsychHtmlButtonResponse, choices: ["Begin"],
+  stimulus: '<div class="prose"><h2>Part 3 of ' + N_PARTS + ': the test</h2>' +
+    '<p>Four short blocks, about fifteen minutes. <b>There is no feedback from here on</b>, which is normal; answer as best you can.</p>' +
+    '<p>Every trial works the same way, and <b>how you move matters as much as what you click</b>:</p>' +
+    '<ol><li>Click <b>START</b> at the bottom. The word appears or plays only after you click.</li>' +
+    '<li><b>Begin moving immediately</b>, toward whichever answer you are leaning to.</li>' +
+    '<li>Click your answer at the top.</li></ol>' +
+    '<p>We record the path your cursor takes, not only your final choice, so please <b>do not sit still, decide, and then jump</b>. ' +
+    'Start moving as soon as the trial begins, even before you are sure, and let your hand follow your thinking. A reminder appears if you wait too long.</p>' +
+    '<p>Accuracy first, speed second.</p>' +
+    '<p style="color:#555"><b>You will not need the keyboard at any point.</b> Everything from here on ' +
+    'is done by moving the mouse and clicking.</p></div>' });
+/* ---- procedure practice ---------------------------------------------------
+   Four trials that teach the movement routine without revealing anything about
+   the language: the stimulus is an arrow, and the answer is which way it points.
+   Participants have never clicked START and moved immediately before, and the
+   first trials of a block would otherwise be spent learning that rather than
+   doing the task. Marked practice and excluded from every analysis.          */
+function arrowPractice() {
+  const trials = shuffle([
+    { dir: "left" }, { dir: "right" }, { dir: "left" }, { dir: "right" }
+  ]).map((t, i) => mtTrial({
+    stimHTML: '<div style="font-size:104px;line-height:1;font-weight:600">' +
+              (t.dir === "left" ? "\u2190" : "\u2192") + '</div>',
+    leftLabel: "LEFT", rightLabel: "RIGHT",
+    leftIsCorrect: t.dir === "left",
+    data: { phase: "procedure_practice", practice: true, practice_index: i + 1,
+            arrow: t.dir, is_word: false }
+  }));
+  return [{
+    type: jsPsychHtmlButtonResponse, choices: ["Start the practice"],
+    stimulus: '<div class="prose"><h3>First, four practice trials</h3>' +
+      '<p>The next four trials are practice. They are not part of the study and nothing is ' +
+      'recorded about how you do on them. They exist so that the way you answer becomes ' +
+      'automatic before the real task starts.</p>' +
+      '<p><b>On every trial from now on:</b></p>' +
+      '<ol><li>Click <span class="key">START</span> at the bottom.</li>' +
+      '<li><b>Begin moving the mouse straight away</b>, even before you are sure of the answer.</li>' +
+      '<li>Click your answer at the top.</li></ol>' +
+      '<p>Here the answer is easy: an arrow appears, and you move to the direction it points. ' +
+      'What matters is the habit of moving as soon as you click START.</p></div>',
+    data: { phase: "procedure_practice_instructions" }
+  }].concat(trials, [{
+    type: jsPsychHtmlButtonResponse, choices: ["I am ready"],
+    stimulus: '<div class="prose"><h3>That is the practice</h3>' +
+      '<p>The real blocks work the same way: click START, start moving immediately, click your answer.</p>' +
+      '<p>The only thing that changes is what you are deciding about.</p></div>',
+    data: { phase: "procedure_practice_done" }
+  }]);
+}
+
+// A checkpoint between stages: a zero-duration trial that writes everything so far.
+const saveHere = (tag) => ({ type: jsPsychHtmlKeyboardResponse, stimulus: "", choices: "NO_KEYS",
+  trial_duration: 1, data: { phase: "checkpoint", checkpoint: tag },
+  on_finish: () => checkpoint(tag) });
+
+timeline.push(...arrowPractice());
+if (MODALITY_FIRST === "read")
+  timeline.push(...readingBlock(), blockDone("Reading"), saveHere("read"), ...listeningBlock(), blockDone("Listening"));
+else
+  timeline.push(...listeningBlock(), blockDone("Listening"), saveHere("listen"), ...readingBlock(), blockDone("Reading"));
+timeline.push(saveHere("ld_done"));
+timeline.push(...competitionBlock());
+timeline.push(blockDone("Matching"), saveHere("matching"));
+timeline.push(...transferBlock());
+timeline.push(blockDone("Final task"), saveHere("transfer"));
+
+if (CONFIG.LEXTALE_EN) { timeline.push(...lexTaleBlock("en")); timeline.push(saveHere("lextale_en")); }
+/* The Spanish vocabulary check is gated on EXPOSURE HISTORY, not on self-rated ability.
+   A participant whose Spanish is weak still produces a valid score -- a near-zero score is
+   a measurement, not a missing value, and the dominance index (English minus Spanish) needs
+   both halves. Skipping the weak ones would truncate the Spanish distribution at exactly
+   the end this sample is most interesting at, and would make "low Spanish" indistinguishable
+   from "not tested".
+   Someone who has never learned or been exposed to Spanish is a different case: the
+   dominance index is not low for them, it is undefined, so they skip and the reason is
+   recorded. The question asks about history, which people report reliably, rather than
+   proficiency, which they do not -- Izura and colleagues found that L2 speakers who rated
+   themselves highly were markedly MORE prone to false alarms. */
+if (CONFIG.LEXTALE_ES) {
+  timeline.push({
+    type: jsPsychHtmlButtonResponse,
+    choices: ["Yes", "No"],
+    stimulus: '<div class="prose"><h3>One question before the last part</h3>' +
+      '<p>The final part is a short Spanish vocabulary check. Before we decide whether to ' +
+      'show it to you, we need to know one thing.</p>' +
+      '<p><b>Have you ever learned Spanish, or been regularly around it?</b></p>' +
+      '<p style="color:#5a5a5a">Any of these counts as yes: you grew up hearing it, you took ' +
+      'classes at school, family or friends speak it to you, or you use it at work. It does ' +
+      '<b>not</b> matter how well you speak it now. People who understand only a little, or ' +
+      'who have forgotten most of it, should still answer yes.</p></div>',
+    data: { phase: "spanish_exposure" },
+    on_finish: function (d) {
+      SPANISH_EXPOSURE = (d.response === 0);
+      d.spanish_exposure = SPANISH_EXPOSURE;
+      jsPsych.data.addProperties({ spanish_exposure: SPANISH_EXPOSURE });
+    }
+  });
+  timeline.push({
+    timeline: lexTaleBlock("sp"),
+    conditional_function: function () { return SPANISH_EXPOSURE; }
+  });
+  timeline.push({
+    timeline: [{ type: jsPsychHtmlButtonResponse, choices: ["Continue"],
+      stimulus: '<div class="prose"><p>Then we will skip the Spanish part. That is the end ' +
+                'of the tasks.</p></div>',
+      data: { phase: "lextale_sp_skipped", lextale_sp_skipped: "no_exposure" } }],
+    conditional_function: function () { return !SPANISH_EXPOSURE; }
+  });
+  timeline.push(saveHere("lextale_es"));
+}
+
+if (CONFIG.MODE === "lab" && !CONFIG.QUALTRICS_URL) {
+  timeline.push({
+    type: jsPsychHtmlButtonResponse, choices: ["Finish and save"],
+    stimulus: function () {
+      return '<div class="prose"><h2>That is the end. Thank you.</h2>' +
+        '<p>You have finished every part of the study.</p>' +
+        '<p><b>Please let the research assistant know you are done.</b></p>' +
+        '<div style="margin:20px 0;padding:14px 16px;border:2px solid #333;border-radius:8px;background:#fafafa">' +
+        '<p style="margin:0 0 4px;color:#555">Session code, for the assistant</p>' +
+        '<p style="font-family:monospace;font-size:26px;letter-spacing:2px;margin:4px 0">' + SUBJECT.uid + '</p></div>' +
+        '<p><b>What the study was about.</b> You learned an invented language in which some words had ' +
+        'an ending that was always spelled the same way, while other words had the same ending spelled ' +
+        'three different ways. Everything else was matched, including how often you heard each word. ' +
+        'We wanted to know whether a spelling pattern that repeats becomes a unit you read through, ' +
+        'which is why we tracked the path of your mouse rather than only your final click.</p>' +
+        '<p><b>Please do not describe the study to anyone who might take part.</b> Knowing what to look ' +
+        'for changes how people learn, and it would make their data unusable.</p>' +
+        '<p>Questions: yucheng.lin@utrgv.edu</p></div>';
+    },
+    data: { phase: "lab_debrief" }
+  });
+} else {
+timeline.push({
+  type: jsPsychHtmlButtonResponse, choices: ["Continue to the questionnaire"],
+  stimulus: '<div class="prose"><h2>That is the end of the tasks</h2>' +
+    '<p>Thank you. The learning and testing parts are finished.</p>' +
+    '<p>One short questionnaire remains, about your language background, your reading history, and the computer ' +
+    'you used. It takes about ten minutes and it is the last thing we will ask of you.</p>' +
+    '<p><b>Please do not close this window.</b> Clicking below saves your data and takes you straight there. ' +
+    'Your research credit is granted at the end of that questionnaire, not here.</p>' +
+    '<div style="margin:24px 0;padding:16px 18px;border:2px solid #333;border-radius:8px;background:#fafafa">' +
+    '<p style="margin:0 0 6px"><b>Your participant code</b></p>' +
+    '<p style="font-family:monospace;font-size:30px;letter-spacing:2px;margin:6px 0" id="uid-show">' + SUBJECT.uid + '</p>' +
+    '<p style="margin:6px 0;color:#555">The questionnaire will fill this in for you. If for any reason the box is ' +
+    'empty when you get there, type this code into it. It is the only thing that connects your two sets of answers, ' +
+    'and without it we cannot use your data or grant your credit.</p>' +
+    '<p style="margin:8px 0 0"><button id="copy-uid" class="jspsych-btn playbtn" type="button">Copy the code</button> ' +
+    '<span id="copy-msg" style="color:#1a7f37;margin-left:10px"></span></p></div></div>',
+  data: { phase: "handoff" },
+  on_load: function () {
+    const b = document.getElementById("copy-uid");
+    if (!b) return;
+    b.addEventListener("click", function () {
+      const t = document.getElementById("uid-show").textContent.trim();
+      const done = () => { document.getElementById("copy-msg").textContent = "Copied."; };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(done).catch(() => {});
+      else {
+        const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta);
+        ta.select(); try { document.execCommand("copy"); done(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  }
+});
+}
+
+timeline.push({ type: jsPsychFullscreen, fullscreen_mode: false });
+timeline.push({ type: jsPsychHtmlKeyboardResponse, choices: "NO_KEYS", trial_duration: 800,
+  stimulus: '<p>Saving your data. Please do not close the window.</p>' });
+
+jsPsych.run(timeline);
+</script>
+</html>

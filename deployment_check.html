@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deployment check</title>
+<script src="lib/jspsych.js"></script>
+<script src="lib/plugin-html-keyboard-response.js"></script>
+<script src="lib/extension-mouse-tracking.js"></script>
+<script src="stimuli.js"></script>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; max-width: 860px;
+         margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #222; }
+  h1 { font-size: 24px; } h2 { font-size: 18px; margin-top: 28px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+  td { padding: 7px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+  td.s { width: 90px; font-weight: 600; }
+  .pass { color: #1a7f37; } .fail { color: #b3452f; } .warn { color: #9a6700; }
+  .word { font-family: 'ArtificialAlphabet', monospace; font-size: 54px; letter-spacing: 8px; }
+  #verdict { margin-top: 26px; padding: 14px 18px; border-radius: 8px; font-size: 18px; }
+  button { font-size: 16px; padding: 8px 18px; margin-right: 10px; }
+  #box { position: relative; height: 180px; border: 1px dashed #bbb; border-radius: 8px; margin-top: 10px; }
+  #dot { position: absolute; width: 12px; height: 12px; background: #b3452f; border-radius: 50%; }
+</style>
+</head>
+<body>
+<h1>Deployment check</h1>
+<p>Open this page at the same address participants will use. It checks everything the study needs, in their browser, before you spend money on data collection. Nothing is saved.</p>
+<p><button id="run">Run all checks</button><button id="audio">Play a test word</button></p>
+<table id="results"></table>
+<div id="verdict"></div>
+
+<h2>Mouse sampling</h2>
+<p>Move the cursor around inside the box for a few seconds. This measures how fast this browser reports movement.</p>
+<div id="box"><div id="dot" style="display:none"></div></div>
+<p id="samplerate"></p>
+
+<script>
+const T = document.getElementById("results");
+function row(name, state, detail) {
+  const cls = state === "PASS" ? "pass" : (state === "WARN" ? "warn" : "fail");
+  T.insertAdjacentHTML("beforeend",
+    '<tr><td class="s ' + cls + '">' + state + '</td><td><b>' + name + '</b><br><span style="color:#555">' + detail + '</span></td></tr>');
+}
+const results = [];
+function record(name, ok, detail, warnOnly) {
+  const state = ok ? "PASS" : (warnOnly ? "WARN" : "FAIL");
+  results.push({ name, state }); row(name, state, detail);
+}
+
+async function runAll() {
+  T.innerHTML = ""; results.length = 0;
+  document.getElementById("verdict").textContent = "";
+
+  // 1. libraries
+  record("jsPsych library", typeof initJsPsych === "function",
+    typeof initJsPsych === "function" ? "loaded from lib/jspsych.js" : "NOT FOUND — check that the lib/ folder was uploaded");
+  record("mouse-tracking extension", typeof jsPsychExtensionMouseTracking !== "undefined",
+    typeof jsPsychExtensionMouseTracking !== "undefined" ? "loaded" : "NOT FOUND — lib/extension-mouse-tracking.js is missing");
+
+  // 1b. every lib file experiment.html loads is actually on the server
+  try {
+    const src = await (await fetch("experiment.html")).text();
+    const libs = [...src.matchAll(/<script src="(lib\/[^"]+)"|<link[^>]+href="(lib\/[^"]+)"/g)].map(m => m[1] || m[2]);
+    const missing = [];
+    for (const f of libs) { try { const r = await fetch(f, { method: "HEAD" }); if (!r.ok) missing.push(f); } catch (e) { missing.push(f); } }
+    record("lib folder complete", missing.length === 0,
+      missing.length === 0 ? "all " + libs.length + " files experiment.html needs are present"
+                           : "MISSING: " + missing.join(", ") + " — re-upload these into lib/");
+  } catch (e) {}
+
+  // 2. stimuli
+  const okStim = (typeof STIM !== "undefined") && STIM.words && STIM.words.length === 56 &&
+                 STIM.nonwords.length === 56 && STIM.transfer.length === 16;
+  record("stimulus file", okStim,
+    okStim ? "56 words, 56 nonwords, 16 transfer items" : "stimuli.js missing or incomplete");
+
+  // 3. font
+  // This check used to PASS without testing anything. document.fonts.check() returns true for
+  // a family that was never declared -- there is nothing left to load -- and this page never
+  // declared the font: experiment.html builds it from FONT_B64 in stimuli.js, this page did not.
+  // So it reported PASS and showed the word in Roman letters ("A3w"), which is what a font
+  // failure looks like. Now the font is registered here exactly as the experiment does it, and
+  // the test is whether text actually renders differently from the fallback.
+  let fontOK = false, fontWhy = "";
+  try {
+    if (typeof FONT_B64 === "undefined" || FONT_B64.length < 1000) throw new Error("FONT_B64 missing from stimuli.js");
+    const ff = new FontFace("ArtificialAlphabetCheck", "url(data:font/ttf;base64," + FONT_B64 + ")");
+    await ff.load(); document.fonts.add(ff);
+    const st = document.createElement("style");
+    st.textContent = ".word{font-family:'ArtificialAlphabetCheck',monospace}";
+    document.head.appendChild(st);
+    const c = document.createElement("canvas").getContext("2d"), probe = okStim ? STIM.words.map(w => w.orth).join("") : "ABCabc123";
+    c.font = "40px monospace"; const w0 = c.measureText(probe).width;
+    c.font = "40px ArtificialAlphabetCheck, monospace"; const w1 = c.measureText(probe).width;
+    fontOK = Math.abs(w1 - w0) > 1;
+    if (!fontOK) fontWhy = "the font loaded but text renders exactly like the fallback";
+  } catch (e) { fontWhy = e.message || "the font could not be loaded"; }
+  record("artificial alphabet font", fontOK,
+    fontOK ? "renders: <span class='word'>" + (okStim ? STIM.words[0].orth : "ABC") +
+             "</span> (these must be invented shapes, not Roman letters)" :
+             "FAILED: " + fontWhy + ". The alphabet is embedded in stimuli.js; re-upload it.");
+
+  // 4. audio files
+  const need = [];
+  if (okStim) {
+    STIM.words.forEach(w => need.push("audio/" + w.item + ".wav"));
+    // only the auditory nonwords have recordings; visual nonwords are never spoken,
+    // which is what lets them carry a trained rime without colliding with a real word
+    STIM.nonwords.filter(n => n.use === "auditory").forEach(n => need.push("audio/" + n.item + ".wav"));
+    [...new Set(STIM.transfer.map(t => t.audio_item))].forEach(a => need.push("audio/" + a + ".wav"));
+  }
+  let missing = [], sizes = 0;
+  await Promise.all(need.map(async u => {
+    try {
+      const r = await fetch(u, { method: "GET" });
+      if (!r.ok) { missing.push(u); return; }
+      const b = await r.blob(); sizes += b.size;
+    } catch (e) { missing.push(u); }
+  }));
+  record("audio files", missing.length === 0,
+    missing.length === 0 ? need.length + " files found, " + (sizes / 1048576).toFixed(1) + " MB total"
+      : missing.length + " missing, first few: " + missing.slice(0, 4).join(", "));
+
+  // 5. audio decodes and plays
+  let dec = null;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const r = await fetch(need[need.length - 1]); const buf = await r.arrayBuffer();
+    const a = await ctx.decodeAudioData(buf);
+    dec = { d: a.duration.toFixed(2), sr: a.sampleRate, ch: a.numberOfChannels };
+  } catch (e) {}
+  record("audio decodes", !!dec,
+    dec ? dec.d + " s, " + dec.sr + " Hz, " + (dec.ch === 1 ? "mono" : dec.ch + " channels")
+        : "the browser could not decode a WAV file");
+
+  // 6. screen and device
+  const bigEnough = window.innerWidth >= 1000 && window.innerHeight >= 700;
+  const touch = /Mobi|Android|iPad|iPhone/i.test(navigator.userAgent);
+  record("window size", bigEnough, window.innerWidth + " by " + window.innerHeight +
+    (bigEnough ? " — participants below 1000 by 700 are excluded automatically" : " — too small; participants would be turned away"), true);
+  record("device type", !touch, touch ? "this looks like a phone or tablet, which the study excludes" : "desktop or laptop");
+
+  // pointing device: the study needs a mouse, and a trackpad can be told apart by how it moves
+  await new Promise(res => {
+    let n = 0, wheelish = 0, last = null, t0 = performance.now();
+    const el = document.getElementById("box");
+    const h = (e) => {
+      const now = performance.now();
+      if (last) { const dt = now - last.t, d = Math.hypot(e.clientX - last.x, e.clientY - last.y);
+                  if (dt > 0 && d / dt > 1.5) wheelish++; }
+      last = { x: e.clientX, y: e.clientY, t: now }; n++;
+    };
+    el.addEventListener("mousemove", h);
+    const done = () => { el.removeEventListener("mousemove", h);
+      record("pointing device", true,
+        n < 20 ? "not enough movement to judge; move the cursor inside the box below and rerun"
+               : "captured " + n + " samples, " + Math.round(100 * wheelish / n) + "% of them fast and continuous. " +
+                 "A mouse gives long smooth sweeps; a trackpad gives short repeated strokes. The study itself asks " +
+                 "the participant directly and turns away trackpad users.", true);
+      res(); };
+    setTimeout(done, 4000);
+  });
+
+  // 7. configuration inside experiment.html
+  let cfg = null;
+  try {
+    const txt = await (await fetch("experiment.html")).text();
+    const grab = k => (txt.match(new RegExp(k + '\\s*:\\s*"([^"]*)"')) || [])[1];
+    cfg = { pipe: grab("DATAPIPE_ID"), mode: grab("MODE"), sona: grab("SONA_CREDIT_URL"), qualtrics: grab("QUALTRICS_URL"),
+            debug: /DEBUG:\s*(true|false)/.exec(txt) ? /DEBUG:\s*(true|false)/.exec(txt)[1] : "?" };
+  } catch (e) {}
+  if (cfg) {
+    record("data destination", !!cfg.pipe,
+      cfg.pipe ? "DataPipe experiment ID is set (" + cfg.pipe + ")"
+               : "DATAPIPE_ID is empty, so each participant's data would download to their own computer instead of reaching you",
+      false);
+    record("follow-up questionnaire", !!cfg.qualtrics,
+      cfg.qualtrics ? "set, participants go on to the questionnaire where credit is granted"
+                    : "QUALTRICS_URL is empty. Participants will see a thank-you page instead of the "
+                    + "questionnaire, and SONA credit is granted at the end of that questionnaire, so they "
+                    + "would not receive it", false);
+    record("pilot mode", cfg.debug === "false",
+      cfg.debug === "false" ? "DEBUG is off, the full study will run" : "DEBUG is TRUE — the study is shortened; set it to false before collecting data");
+  }
+
+  // 8. DataPipe reachable
+  if (cfg && cfg.pipe) {
+    let reach = false;
+    // A real request; the server answers 4xx to an empty body but that still proves it is reachable.
+    try { const r = await fetch("https://pipe.jspsych.org/api/data/", { method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "*/*" }, body: "{}" });
+          reach = r.status > 0; } catch (e) {}
+    record("DataPipe reachable", reach, reach ? "the server responded" : "could not reach pipe.jspsych.org from this network", true);
+  }
+
+  // 8b. the two links to hand out, built from this address so they cannot be mistyped
+  if (cfg && cfg.mode === "auto") {
+    const base = location.href.replace(/deployment_check\.html.*$/, "experiment.html");
+    record("one link, both settings", true,
+      "MODE is \"auto\". Laboratory (the assistant opens this): " + base + " . " +
+      "SONA Study URL (paste exactly, the code is what makes it remote): " + base + "?id=%SURVEY_CODE% . " +
+      "Prolific: " + base + "?PROLIFIC_PID={{%PROLIFIC_PID%}} . " +
+      "A link with a participant code is always remote; the plain address is always the lab version.");
+  } else if (cfg) {
+    record("one link, both settings", false,
+      "MODE is \"" + cfg.mode + "\", so this deployment serves only that setting and the other one needs " +
+      "its own copy. Set MODE to \"auto\" unless you meant to force it.", true);
+  }
+
+  // 9. URL parameters (only matter in remote mode; the lab form supplies the identifier)
+  const q = new URLSearchParams(location.search);
+  const gotID = q.get("PROLIFIC_PID") || q.get("id");
+  const labMode = cfg && (cfg.mode === "lab" || (cfg.mode === "auto" && !gotID));
+  if (labMode) record("participant identifier", true, "lab mode: the research assistant's form supplies it");
+  else record("participant identifier", !!gotID,
+    gotID ? "read from the link: " + gotID
+          : "no identifier in this URL. Test again with ?PROLIFIC_PID=test123 or ?id=test123 appended", true);
+
+  // verdict
+  const fails = results.filter(r => r.state === "FAIL").length;
+  const warns = results.filter(r => r.state === "WARN").length;
+  const v = document.getElementById("verdict");
+  if (fails === 0 && warns === 0) { v.style.background = "#e6f4ea"; v.innerHTML = "<b>Ready.</b> Everything the study needs is in place at this address."; }
+  else if (fails === 0) { v.style.background = "#fff8e1"; v.innerHTML = "<b>Ready, with " + warns + " thing" + (warns > 1 ? "s" : "") + " to look at.</b> Nothing here would stop the study from running."; }
+  else { v.style.background = "#fdecea"; v.innerHTML = "<b>Not ready: " + fails + " check" + (fails > 1 ? "s" : "") + " failed.</b> Fix those before sending the link to anyone."; }
+}
+
+document.getElementById("run").addEventListener("click", runAll);
+document.getElementById("audio").addEventListener("click", () => {
+  if (typeof STIM !== "undefined") new Audio("audio/" + STIM.words[0].item + ".wav").play().catch(() => alert("Could not play the file."));
+});
+
+// mouse sampling rate
+(function () {
+  const box = document.getElementById("box"), dot = document.getElementById("dot");
+  let n = 0, t0 = null;
+  box.addEventListener("mousemove", e => {
+    const r = box.getBoundingClientRect();
+    dot.style.display = "block"; dot.style.left = (e.clientX - r.left - 6) + "px"; dot.style.top = (e.clientY - r.top - 6) + "px";
+    if (t0 === null) t0 = performance.now();
+    n++;
+    const secs = (performance.now() - t0) / 1000;
+    if (secs > 0.7) document.getElementById("samplerate").textContent =
+      "About " + Math.round(n / secs) + " samples per second over " + secs.toFixed(1) + " s. Anything above 50 is comfortable for this study.";
+  });
+})();
+runAll();
+</script>
+</body>
+</html>
