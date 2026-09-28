@@ -181,6 +181,8 @@ const CONFIG = {
                                    // and the dominance index needs it. It was false until
                                    // 24 September 2026, which would have silently dropped a
                                    // registered measure from every session in an HSI sample.
+  IRB_PROTOCOL:     "",            // UTRGV IRB protocol number, shown on the consent screen.
+                                   // PREFLIGHT.R warns while this is empty.
   DEBUG:            false
 };
 
@@ -236,12 +238,12 @@ const jsPsych = initJsPsych({
   on_finish: () => saveAndRedirect(jsPsych.data.get().csv())
 });
 /* A fingerprint of the materials actually in use: the lexicon, the embedded font and the
-   first 2 KB of every recording. It is recomputed by compute_materials_version.py and
+   first 2 KB of every recording. It is recomputed by compute_materials_version.R and
    stamped on every row, so data collected before and after a change to the materials can
    be told apart. Without it they pool silently -- the files look identical, and no column
    says otherwise. This project changed its font and re-equalised its audio mid-development;
    had that happened mid-collection, nothing would have shown it. */
-const MATERIALS_VERSION = "e8d2681cb968";
+const MATERIALS_VERSION = "a5fc96897d03";
 
 /* repeat_participant is set by a screen that only appears when this machine has run the
    study before, so the very first session on a computer carried no such column at all.
@@ -409,7 +411,11 @@ function playTone(freq, gainDb, antiphase) {
     for (let ch = 0; ch < 2; ch++) {
       const d = buf.getChannelData(ch), sign = (antiphase && ch === 1) ? -1 : 1;
       for (let i = 0; i < d.length; i++) {
-        const t = i / sr, env = Math.min(1, t / 0.05) * Math.min(1, (dur - t) / 0.05);
+        // 100 ms on- and off-ramps from half a Hann window, as Woods et al. (2017) specify.
+        // (Before 25 Sep 2026 these were 50 ms linear ramps, which the paper does not use.)
+        const t = i / sr, R = 0.1,
+              env = (t < R ? 0.5 - 0.5 * Math.cos(Math.PI * t / R) : 1) *
+                    (dur - t < R ? 0.5 - 0.5 * Math.cos(Math.PI * (dur - t) / R) : 1);
         d[i] = sign * amp * env * Math.sin(2 * Math.PI * freq * t);
       }
     }
@@ -533,12 +539,20 @@ function mtTrial(opts) {
       const start = document.getElementById("mt-start");
       const stim  = document.getElementById("mt-stim");
       let started = false, t0 = 0, audioEl = null, audioStart = null, audioDur = null, audioFailed = false;
+      // The mouse-tracking extension timestamps its samples from the moment the trial LOADS,
+      // and it records the cursor on its way to START as well. rt and audio_start_ms are timed
+      // from the START click. click_t puts the click on the extension's clock (it is read from
+      // the extension's own start time; this trial's load time is the fallback),
+      // and the analysis keeps only samples from the click onward (added 26 September 2026).
+      const tLoad = performance.now();
+      let clickT = null, clickX = null, clickY = null;
       const finish = (side) => {
         const rt = performance.now() - t0;
         if (audioEl) { try { audioEl.pause(); } catch (e) {} }
         if (initTimer) clearTimeout(initTimer);
         if (rtTimer) clearTimeout(rtTimer);
-        jsPsych.finishTrial({ response_side: side, rt: Math.round(rt), jolt_px: Math.round(maxWrongX),
+        jsPsych.finishTrial({ response_side: side, rt: Math.round(rt), jolt_px: Math.round(side === "left" ? maxRightX : maxLeftX),
+          click_t: clickT, click_x: clickX, click_y: clickY,
           correct: (side === "left") === !!opts.leftIsCorrect, started: started, late_start: lateStart,
           audio_start_ms: audioStart === null ? null : Math.round(audioStart),
           audio_duration_ms: audioDur,
@@ -549,7 +563,9 @@ function mtTrial(opts) {
           rt_from_audio_offset: (audioStart === null || audioDur === null) ? null : Math.round(rt - audioStart - audioDur) });
       };
       let lateStart = false, moved = false, initTimer = null, rtTimer = null;
-      let maxWrongX = 0;   // furthest excursion toward the unchosen side, for the jolt flag
+      // furthest excursion past the midline on each side after the click; at the response the
+      // one toward the UNCHOSEN side is kept, for the jolt flag
+      let maxLeftX = 0, maxRightX = 0;
       const startEl = start.getBoundingClientRect();
       const midX = startEl.left + startEl.width / 2;
       const onMove = () => { if (!moved) { moved = true; if (initTimer) clearTimeout(initTimer); } };
@@ -557,12 +573,21 @@ function mtTrial(opts) {
       // alternative". We record the size of the excursion rather than rerunning the trial,
       // because rerunning would change the item counts a within-item design depends on.
       stage.addEventListener("mousemove", function (e) {
-        const d = Math.abs(e.clientX - midX);
-        if (d > maxWrongX) maxWrongX = d;
+        if (!started) return;          // only movement after the START click counts
+        const d = e.clientX - midX;
+        if (d < 0 && -d > maxLeftX) maxLeftX = -d;
+        if (d > 0 && d > maxRightX) maxRightX = d;
       });
-      start.addEventListener("click", function () {
+      start.addEventListener("click", function (ev) {
         if (started) return;
         started = true; t0 = performance.now();
+        // Read the extension's own trial-start time when it is exposed, so click_t is on
+        // exactly the clock of the samples; fall back to this trial's load time.
+        let tRef = tLoad;
+        try { const mt = jsPsych.extensions && jsPsych.extensions["mouse-tracking"];
+              if (mt && typeof mt.currentTrialStartTime === "number") tRef = mt.currentTrialStartTime; } catch (e) {}
+        clickT = Math.round(t0 - tRef);
+        clickX = Math.round(ev.clientX); clickY = Math.round(ev.clientY);
         start.style.visibility = "hidden";
         document.getElementById("mt-hint").style.visibility = "hidden";
         if (opts.stimHTML) stim.innerHTML = opts.stimHTML;
@@ -600,7 +625,7 @@ function mtTrial(opts) {
       // On spoken trials the answer areas stay locked until playback has begun, so a
       // trial can never be answered before the word exists. Mitterer (2025) achieves the
       // same thing by tying the response objects to the sound.
-      const gate = () => (!opts.audio) || audioStart !== null;
+      const gate = () => (!opts.audio) || audioStart !== null || audioFailed;
       if (opts.audio) {
         ["left", "right"].forEach(s => { const el = document.getElementById("mt-" + s); el.style.opacity = "0.35"; });
       }
@@ -608,7 +633,12 @@ function mtTrial(opts) {
         const el = document.getElementById("mt-" + s); if (el) el.style.opacity = "1"; }); };
       if (opts.audio) {
         const iv = setInterval(() => { if (audioStart !== null || audioFailed) { unlock(); clearInterval(iv); } }, 20);
-        setTimeout(() => { unlock(); clearInterval(iv); }, CONFIG.AUDIO_DELAY + 3000);   // never lock forever
+        // Never lock forever. If playback has not begun 3 s after it was due, the sound is
+        // treated as failed: the answers unlock AND accept a click, and the trial is recorded
+        // with audio_failed = true so the registered exclusion removes it. (Until 27 September
+        // 2026 only the opacity changed, gate() stayed false, and a failed sound hung the session.)
+        setTimeout(() => { if (audioStart === null) audioFailed = true; unlock(); clearInterval(iv); },
+                   CONFIG.AUDIO_DELAY + 3000);
       }
       ["left", "right"].forEach(side => {
         document.getElementById("mt-" + side).addEventListener("click", function () {
@@ -646,19 +676,17 @@ function mtTrial(opts) {
         d.path = d.mouse_tracking_data.map(s => Math.round(s.x) + " " + Math.round(s.y) + " " + Math.round(s.t)).join(";");
         delete d.mouse_tracking_data;
       }
-      // movement decomposed: how long before the hand moved, and how long the move took
+      // movement decomposed: how long after the START click the hand moved (more than 12 px
+      // from where it clicked), and how long the move then took. Only samples from the click
+      // onward count, and both times are on the click's clock, like rt.
       d.initiation_time = null; d.movement_time = null;
-      if (d.path) {
-        const s = d.path.split(";");
-        if (s.length > 3) {
-          const first = s[0].split(" ").map(Number);
-          let moveT = null;
-          for (let i = 1; i < s.length; i++) {
-            const q = s[i].split(" ").map(Number);
-            if (Math.hypot(q[0] - first[0], q[1] - first[1]) > 12) { moveT = q[2]; break; }
-          }
-          if (moveT !== null) { d.initiation_time = moveT; d.movement_time = d.rt - moveT; }
+      if (d.path && d.click_t !== null && d.click_t !== undefined) {
+        const s = d.path.split(";").map(z => z.split(" ").map(Number)).filter(q => q[2] >= d.click_t);
+        let moveT = null;
+        for (let i = 0; i < s.length; i++) {
+          if (Math.hypot(s[i][0] - d.click_x, s[i][1] - d.click_y) > 12) { moveT = s[i][2] - d.click_t; break; }
         }
+        if (moveT !== null) { d.initiation_time = moveT; d.movement_time = d.rt - moveT; }
       }
       d.screen_w = window.innerWidth; d.screen_h = window.innerHeight;
 
@@ -710,23 +738,6 @@ function mtListenTrial(w) {
             onset: w.onset, spelling: w.spelling, target_orth: w.orth, is_word: true,
             competitor: comp.item, competitor_orth: comp.orth, competitor_cell: comp.cell,
             competitor_rime: comp.rime, competitor_shares_rime: comp.rime === w.rime,
-            true_rime_competitor: comp.true_rime_competitor, competitor_onset: comp.onset,
-            target_side: leftIsTarget ? "left" : "right" }
-  });
-}
-/* reading: see a spelling, choose between two spoken forms played from the
-   two response areas on hover-free click; to keep trajectories clean the
-   options are labelled and their sounds play when the trial starts */
-function mtReadTrial(w) {
-  const comp = rimeCompetitor(w), leftIsTarget = Math.random() < 0.5;
-  return mtTrial({
-    stimHTML: '<p class="word">' + w.orth + '</p>',
-    leftLabel:  leftIsTarget ? "Sound 1" : "Sound 2",
-    rightLabel: leftIsTarget ? "Sound 2" : "Sound 1",
-    leftIsCorrect: leftIsTarget,
-    data: { phase: "mt_read", modality: "reading", item: w.item, cell: w.cell, rime: w.rime,
-            onset: w.onset, spelling: w.spelling, target_orth: w.orth, is_word: true,
-            competitor: comp.item, competitor_orth: comp.orth, competitor_shares_rime: comp.rime === w.rime,
             true_rime_competitor: comp.true_rime_competitor, competitor_onset: comp.onset,
             target_side: leftIsTarget ? "left" : "right" }
   });
@@ -919,7 +930,7 @@ timeline.push({ type: jsPsychBrowserCheck, inclusion_function: d => d.width >= 1
 const CONSENT_ITEMS = [
   "I am in a <b>quiet room</b>. There is no television, music, conversation, or background noise where I am sitting, and I will not be interrupted for the next two hours.",
   "I am using a desktop or laptop computer with a <b>separate mouse</b>. A laptop trackpad or a touchscreen will not work for this study.",
-  "I can hear my computer clearly, through headphones, earbuds, or speakers.",
+  "I am wearing <b>headphones or earbuds</b> and can hear my computer clearly through them. Loudspeakers will not work for this study.",
   "My hearing is normal.",
   "My vision is normal, or corrected to normal with glasses or contact lenses.",
   "I have no history of brain injury or neurological illness, and I am not taking medication that affects attention or alertness.",
@@ -942,8 +953,13 @@ timeline.push({
     'words by moving the mouse to your answer. At the end you will be sent to a short questionnaire about your ' +
     'language background and reading history. How long the study takes depends on how quickly you learn ' + 'the words: for most people between 60 and 105 minutes, and up to two hours for a few.</p>' +
     '<p><b>What we record.</b> Your key presses and mouse clicks, the path your cursor takes on the screen, how long ' +
-    'you take to respond, and your answers. We do not record audio, video, or images of you, and we do not ask for ' +
-    'your name. Your data are labeled with a random code, not with anything that identifies you.</p>' +
+    'you take to respond, and your answers. We do not record audio, video, or images of you. ' +
+    (CONFIG.MODE === "lab"
+      ? 'The research assistant has entered your name and email so that your credit can be granted. They are kept ' +
+        'only in the private data file, removed before the data are analysed or shared, and never published. '
+      : 'We do not ask for your name. Your participant-pool ID is stored only so that your credit can be granted, ' +
+        'and it is removed before the data are analysed or shared. ') +
+    'Your responses are labeled with a random code.</p>' +
     '<p><b>Risks and benefits.</b> The risks are no greater than those of ordinary computer use. You may find the ' +
     'learning phase tiring; you can rest between blocks. There is no direct benefit to you, but the study will help ' +
     'us understand how reading is learned.</p>' +
@@ -953,11 +969,14 @@ timeline.push({
       : 'Credit is granted after the final questionnaire.</p>') +
     '<p><b>The study has several parts and they must be done in one sitting.</b> After you begin, please do not ' +
     'close the window, refresh the page, or let the computer go to sleep until you reach the final page of the ' +
-    'questionnaire that follows. The parts are saved together at the end, so a session that stops partway through ' +
-    'cannot be resumed and leaves us with data we cannot use. Please set aside two hours before you start, ' + 'even though most people finish sooner.</p>' +
+    'questionnaire that follows. A session that stops partway through cannot be resumed. The parts you completed ' +
+    'are saved as you go and may still be used. Please set aside two hours before you start, ' + 'even though most people finish sooner.</p>' +
     '<p><b>Taking part is voluntary.</b> You may stop at any time by closing the window, and you do not have to ' +
     'give a reason.</p>' +
-    '<p><b>Questions.</b> Contact Yu-Cheng Lin at yucheng.lin@utrgv.edu.</p>' +
+    '<p><b>Questions.</b> Contact Yu-Cheng Lin at yucheng.lin@utrgv.edu.' +
+    (CONFIG.IRB_PROTOCOL ? ' This study was reviewed by the UTRGV Institutional Review Board (protocol ' +
+      CONFIG.IRB_PROTOCOL + '). For questions about your rights as a participant, contact the UTRGV IRB.' : '') +
+    '</p>' +
     '<hr style="margin:22px 0">' +
     '<p><b>Before you begin, please confirm each of the following.</b></p>' +
     '<div id="consent-list" style="line-height:2">' +
@@ -1024,8 +1043,8 @@ timeline.unshift({
         '<p>' + n + ' completed session' + (n === 1 ? '' : 's') + ' on this machine. In a lab that is ' +
         'normal, and it usually means nothing.</p>' +
         '<p><b>Choose the second option only if this same participant has taken part before</b>, ' +
-        'for instance because a first attempt did not finish. That is allowed, and the data will be ' +
-        'marked so the analysis can take account of it.</p></div>';
+        'for instance because a first attempt did not finish. A second attempt is marked and excluded ' +
+        'from the analysis, so please do not run one: grant credit for the first attempt instead.</p></div>';
     },
     data: { phase: "repeat_check" },
     on_finish: function (d) {
@@ -1249,7 +1268,7 @@ timeline.push({ type: jsPsychHtmlButtonResponse, choices: ["Begin"],
     '<p>Now you will learn the spellings. On each trial you will <b>hear one word</b> and see <b>two spellings</b> side by side. Click the one you think is correct.</p>' +
     '<p>You will not know the answers at first, so guess. After every choice you will be shown the correct spelling, and that is how you learn.</p>' +
     '<p><b>How long this part lasts is up to you.</b> Trials come in blocks of 56. After each block you will see how accurate you were and can rest. ' +
-    'As soon as you are 90% accurate in two blocks in a row, this part ends. Most people need between 6 and 20 blocks.</p>' +
+    'This part ends once you know the words well. Most people need between 6 and 20 blocks.</p>' +
     '<p>Take it seriously: everything after this depends on having learned the spellings.</p></div>' });
 timeline.push(trainingLoop);
 
@@ -1529,7 +1548,7 @@ timeline.push({
   stimulus: '<div class="prose"><h2>That is the end of the tasks</h2>' +
     '<p>Thank you. The learning and testing parts are finished.</p>' +
     '<p>One short questionnaire remains, about your language background, your reading history, and the computer ' +
-    'you used. It takes about ten minutes and it is the last thing we will ask of you.</p>' +
+    'you used. It takes about fifteen minutes and it is the last thing we will ask of you.</p>' +
     '<p><b>Please do not close this window.</b> Clicking below saves your data and takes you straight there. ' +
     'Your research credit is granted at the end of that questionnaire, not here.</p>' +
     '<div style="margin:24px 0;padding:16px 18px;border:2px solid #333;border-radius:8px;background:#fafafa">' +
